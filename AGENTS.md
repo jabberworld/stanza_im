@@ -265,9 +265,10 @@ bare no-`@` JID already present in a stale roster/cache is likewise kept in
 в список» adds the server JID to the roster, shows it
 immediately in the virtual **«Сервер»** group (`roster_group_server`,
 `_sync_server_roster`) and starts one `client.discover_service_info(bare)`
-probe; `category == "gateway"` moves it to `_transport_jids`, removes it from
-«Сервер» and persists `core/transports.py` → `transports.json`, while any other
-answer (or a failed probe) leaves it in «Сервер». The «Сервер» list itself is
+probe; any identity with `category == "gateway"` moves it to
+`_transport_jids`, removes it from «Сервер» and persists
+`core/transports.py` → `transports.json`, while any other answer (or a failed
+probe) leaves it in «Сервер». The «Сервер» list itself is
 persisted per profile in `core/servers.py` → `servers.json`; `_load_servers`
 reads it **before** the roster is built so the rows do not flash as ordinary
 contacts, and a full roster prunes JIDs the server no longer returns
@@ -1538,7 +1539,11 @@ skips the `runJavaScript`, so a background window does not churn IPC/JS), so
 background tabs are never polled; the last-seen query is skipped while the view
 sits at the bottom. A `__stanzaScrollDirty` flag set by real scrolls/DOM
 appends lets an idle poll reuse `__stanzaVisibleCache` instead of scanning
-every `.stanza-message`; the seen/unread update runs only for a dirty poll. The
+every `.stanza-message`; the seen/unread update runs when the poll is dirty
+**or the scroll offset actually changed** (a scrollbar drag whose flag was
+reset between polls). A focus/OSD click also forces a fresh visible-ref read
+(`ChatView.refresh_visible_refs`) before `_apply_visible_unread`, so a shown
+message cannot stay unread. The
 `▼` shares a centred
 bottom row (`#stanza-fabs` / `_position_fab_buttons`) with the mention `@`
 button (left) and the reaction `♥` button (right, see below); all three labels
@@ -2586,7 +2591,13 @@ correction whose target is not found behaves the same way
 (`_apply_or_append_correction`/`_apply_or_append_muc_correction`, logged
 `EDIT[orphan-live]`): the corrected text is appended as a new edited message
 (the incoming one also bumps the unread counter) instead of being dropped —
-duplicates are preferred over losing the new version. Outgoing messages carry
+duplicates are preferred over losing the new version. A **join replay** can
+deliver the original and its correction before either is in SQLite: the
+archived correction is buffered with its `replace_id`, the originals are stored
+first and the edits are applied afterwards (`_flush_muc_replay` →
+`_apply_mam_edits`). The raw MUC stanza `id` is stored as `message_id` (the
+stable reply id stays in `origin_id`/`stanza_id`) so a `<replace id>` that
+names the raw id still resolves. Outgoing messages carry
 an XEP-0359 `<origin-id/>` (the stanza id) so peers such as Monocles reference
 a stable id; a peer that uses its own local id (seen with Monocles) cannot be
 matched reliably, so its correction lands as a new message. History gains

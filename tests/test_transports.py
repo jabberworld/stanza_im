@@ -8,6 +8,8 @@ import asyncio
 import os
 import sys
 import tempfile
+from types import SimpleNamespace
+from xml.etree import ElementTree as ET
 
 os.environ["XDG_DATA_HOME"] = os.path.join(tempfile.mkdtemp(), "data")
 os.environ["XDG_CONFIG_HOME"] = os.path.join(tempfile.mkdtemp(), "config")
@@ -17,6 +19,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from PyQt6 import QtWidgets
 
+from stanza_im.core.client import JabberClient
 from stanza_im.i18n import load as i18n_load
 from stanza_im.i18n import tr
 from stanza_im.ui.main_window import MainWindow
@@ -60,9 +63,19 @@ class _FakeClient:
 
     async def discover_service_info(self, jid, node=""):
         self.probed.append(jid)
-        return {"jid": jid, "node": "", "name": "",
-                "category": "gateway" if jid == GW else "", "type": "",
-                "features": []}
+        if jid == GW:
+            return {"jid": jid, "node": "", "name": "",
+                    "category": "conference", "type": "",
+                    "features": [],
+                    "categories": ["account", "conference", "gateway",
+                                   "pubsub"],
+                    "has_gateway": True,
+                    "identities": [
+                        {"category": "conference", "type": "", "name": ""},
+                        {"category": "gateway", "type": "", "name": ""},
+                    ]}
+        return {"jid": jid, "node": "", "name": "", "category": "",
+                "type": "", "features": []}
 
     def get_contact(self, jid):
         return _Contact(self.shows.get(jid, "offline"))
@@ -137,6 +150,41 @@ check("a plain roster item is not auto-classified",
       GW not in win._transport_jids)
 
 loop = asyncio.get_event_loop()
+
+
+class _Info:
+    xml = ET.fromstring(
+        "<query xmlns='http://jabber.org/protocol/disco#info'>"
+        "<identity category='conference' type='text'/>"
+        "<identity category='account' type='registered'/>"
+        "<identity category='pubsub' type='pep'/>"
+        "<identity category='gateway' type='telegram'/>"
+        "<feature var='jabber:iq:version'/>"
+        "</query>")
+
+
+class _Disco:
+    async def get_info(self, jid=None, node=None):
+        return _Info()
+
+
+bare_client = JabberClient.__new__(JabberClient)
+bare_client.xmpp = SimpleNamespace(plugin={"xep_0030": _Disco()})
+info = loop.run_until_complete(
+    bare_client.discover_service_info("tg.jabberworld.info"))
+check("disco collects every identity, not only the first",
+      info["category"] == "conference"
+      and info["categories"] == ["account", "conference", "gateway",
+                                 "pubsub"]
+      and info["has_gateway"] is True)
+check("the first identity stays available for generic callers",
+      info["category"] == "conference" and info["type"] == "text")
+check("a multi-identity gateway is recognised",
+      MainWindow._is_gateway_info(info))
+check("a plain server is not a gateway",
+      not MainWindow._is_gateway_info({"category": "conference",
+                                       "categories": ["conference"]}))
+
 win._begin_explicit_server_add(GW, name="J2J")
 check("an explicitly added gateway is visible in «Сервер» while probing",
       any(u.jid == GW and u.group == tr("roster_group_server")

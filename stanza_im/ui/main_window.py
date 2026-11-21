@@ -2828,6 +2828,27 @@ class MainWindow(QtWidgets.QMainWindow):
         self._sync_server_roster(bare)
         self._start_task(self._probe_explicit_server(bare))
 
+    @staticmethod
+    def _is_gateway_info(info: dict | None) -> bool:
+        """Whether any advertised identity of *info* is a gateway."""
+        if not isinstance(info, dict):
+            return False
+        if info.get("has_gateway"):
+            return True
+        categories = {
+            str(category or "").lower()
+            for category in (info.get("categories") or [])
+        }
+        category = str(info.get("category") or "").lower()
+        if category:
+            categories.add(category)
+        for identity in info.get("identities") or []:
+            if isinstance(identity, dict):
+                value = str(identity.get("category") or "").lower()
+                if value:
+                    categories.add(value)
+        return "gateway" in categories
+
     async def _probe_explicit_server(self, bare: str) -> None:
         """Classify an explicitly added server JID as a gateway or a server."""
         bare = str(bare or "").split("/", 1)[0]
@@ -2840,7 +2861,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._server_pending.discard(bare)
         if self._client is None or bare not in getattr(self, "_server_jids", set()):
             return
-        if str((info or {}).get("category") or "").lower() == "gateway":
+        if self._is_gateway_info(info):
             self._server_jids.discard(bare)
             self._save_servers()
             self._roster.remove_user(bare)
@@ -7469,6 +7490,8 @@ class MainWindow(QtWidgets.QMainWindow):
                                     is_new=is_new, anchor=restore_anchor)
                 self._apply_muji_support(jid)
                 self._apply_muc_admin(jid)
+                QtCore.QTimer.singleShot(
+                    0, lambda key=jid: self._refresh_visible_state(key))
             else:
                 self._track_not_in_roster(jid, display_name)
                 is_new = not self._chat_window.has_chat(jid)
@@ -9023,6 +9046,12 @@ class MainWindow(QtWidgets.QMainWindow):
         updater = getattr(chat, "request_anchor_update", None)
         if callable(updater):
             updater()
+        if has_window:
+            # A current tab opened by an OSD may already have a rendered DOM
+            # but a stale visible-ref list.  Re-read the viewport before the
+            # visible-unread reconciliation below.
+            QtCore.QTimer.singleShot(
+                0, lambda key=jid: self._refresh_visible_state(key))
         if is_new or not has_window:
             self._schedule_mds_reconcile(jid)
         self._push_reaction_pending(jid)
@@ -9233,6 +9262,21 @@ class MainWindow(QtWidgets.QMainWindow):
         self._push_unread_to_chat(jid)
         self._queue_mds_displayed(jid, sid)
         self._schedule_unread_save()
+
+    def _refresh_visible_state(self, jid: str) -> None:
+        """Ask the active chat to re-read its viewport before reconciling."""
+        chat = (self._chat_window.get_chat(jid)
+                if self._chat_window is not None else None)
+        if chat is None:
+            return
+        if not (self._chat_area_available()
+                and self._chat_window.current_jid() == jid):
+            return
+        refresh = getattr(chat, "refresh_visible_state", None)
+        if callable(refresh):
+            refresh()
+        else:
+            self._apply_visible_unread(jid)
 
     def _apply_visible_unread(self, jid: str, attempt: int = 0) -> None:
         """Reconcile the counter with the unread messages now on screen.
@@ -10379,12 +10423,14 @@ class MainWindow(QtWidgets.QMainWindow):
                               markup: dict | None = None,
                               urgency: str = "",
                               stanza_id: str = "",
-                              quick_response: dict | None = None):
+                              quick_response: dict | None = None,
+                              msg_id: str = ""):
         self._touch_tab_activity(room)
         if archived:
             self._buffer_muc_replay(room, nick, body, ts, archive_id,
                                     stanza_id, reply_able_id, reply_to,
-                                    reply_id, markup, quick_response)
+                                    reply_id, markup, quick_response,
+                                    msg_id=msg_id)
             return
         logger.debug("Live groupchat message: room=%s nick=%s archive_id=%s",
                      room, nick, archive_id or "none")
@@ -10423,7 +10469,7 @@ class MainWindow(QtWidgets.QMainWindow):
             timestamp=stamp, sender=nick,
             archive_id=archive_id,
             origin_id=reply_ref_id,
-            message_id=reply_ref_id,
+            message_id=msg_id or reply_ref_id,
             reply_to=reply_to, reply_id=reply_id, media=media,
             encrypted=encrypted, markup=markup, stanza_id=stanza_id,
             quick_response=quick_response))
@@ -10456,16 +10502,19 @@ class MainWindow(QtWidgets.QMainWindow):
     def _buffer_muc_replay(self, room: str, nick: str, body: str, ts,
                            archive_id: str, stanza_id: str,
                            origin_id: str, reply_to: str, reply_id: str,
-                           markup, quick_response) -> None:
+                           markup, quick_response, *, msg_id: str = "",
+                           replace_id: str = "") -> None:
         """Batch join-time history instead of one SQLite write per message."""
         row = {
             "direction": "incoming", "body": body,
             "timestamp": ts or _current_timestamp(), "sender": nick,
             "archive_id": archive_id, "stanza_id": stanza_id,
             "origin_id": origin_id, "reply_to": reply_to,
-            "reply_id": reply_id, "markup": markup,
-            "quick_response": quick_response,
+            "reply_id": reply_id, "message_id": msg_id or origin_id,
+            "markup": markup, "quick_response": quick_response,
         }
+        if replace_id:
+            row["replace_id"] = replace_id
         self._muc_replay_buffers.setdefault(room, []).append(row)
         if room in self._muc_replay_timers:
             return
@@ -10479,19 +10528,42 @@ class MainWindow(QtWidgets.QMainWindow):
         if not rows:
             return
         rows = self._replay_rows_to_store(room, rows)
-        if not rows:
+        edits = [row for row in rows if row.get("replace_id")]
+        rows = [row for row in rows if not row.get("replace_id")]
+        if not rows and not edits:
             return
-        self._start_task(self._store_muc_replay(room, rows))
+        self._start_task(self._store_muc_replay(room, rows, edits))
 
-    async def _store_muc_replay(self, room: str, rows: list[dict]) -> None:
+    async def _store_muc_replay(self, room: str, rows: list[dict],
+                                edits: list[dict] | None = None) -> None:
         from stanza_im.core import history
-        await history.store_many_async(room, rows)
+        if rows:
+            await history.store_many_async(room, rows)
+        if edits:
+            # A join replay can carry a correction before the local archive
+            # has the original.  Store the originals first, then apply the
+            # corrections, so `replace_message` can resolve the raw stanza id.
+            if self._client is not None:
+                await self._client._apply_mam_edits(room, edits)
+            else:  # pragma: no cover - defensive for bare test windows
+                for row in edits:
+                    ref = str(row.get("replace_id") or "")
+                    replaced = await history.replace_message_async(
+                        room, ref, str(row.get("body") or ""),
+                        markup=row.get("markup"))
+                    if replaced:
+                        continue
+                    extra = {key: value for key, value in row.items()
+                             if key != "replace_id"}
+                    extra["edited"] = True
+                    await history.store_many_async(room, [extra])
         chat = self._chat_window.get_chat(room)
         if (chat is not None and self._chat_area_visible()
                 and self._chat_window.current_jid() == room
                 and not getattr(chat, "_user_scrolled_up", False)):
             chat.schedule_tail_refresh(
-                force=any(not row.get("archive_id") for row in rows))
+                force=(bool(edits)
+                       or any(not row.get("archive_id") for row in rows)))
 
     def _replay_rows_to_store(self, room: str,
                               rows: list[dict]) -> list[dict]:
@@ -12234,21 +12306,32 @@ class MainWindow(QtWidgets.QMainWindow):
                                         reply_to: str = "",
                                         reply_id: str = "",
                                         media: dict | None = None,
-                                        markup: dict | None = None):
+                                        markup: dict | None = None,
+                                        archived: bool = False,
+                                        msg_id: str = ""):
         """A participant corrected their MUC message (XEP-0308)."""
+        nick = frm.split("/", 1)[1] if "/" in frm else ""
+        if archived:
+            # A join-time replay can deliver the correction before the
+            # original is in SQLite.  Keep it in the replay batch and apply it
+            # after the originals are stored.
+            self._buffer_muc_replay(
+                room, nick, body, ts, "", "", stable_id, reply_to,
+                reply_id, markup, None, msg_id=msg_id, replace_id=ref_id)
+            return
         chat = self._chat_window.get_chat(room)
         applied = bool(chat and chat.edit_message_by_ref(
             ref_id, body, markup=markup))
-        nick = frm.split("/", 1)[1] if "/" in frm else ""
         self._start_task(self._apply_or_append_muc_correction(
             room, ref_id, body, ts, stable_id, frm, nick, reply_to,
-            reply_id, media, markup, applied))
+            reply_id, media, markup, applied, msg_id=msg_id))
 
     async def _apply_or_append_muc_correction(self, room: str, ref_id: str,
                                               body: str, ts, stable_id: str,
                                               frm: str, nick: str,
                                               reply_to: str, reply_id: str,
-                                              media, markup, applied: bool):
+                                              media, markup, applied: bool,
+                                              msg_id: str = ""):
         from stanza_im.core import history
         replaced = await history.replace_message_async(
             room, ref_id, body, markup=markup)
@@ -12265,7 +12348,7 @@ class MainWindow(QtWidgets.QMainWindow):
         stamp = ts or _current_timestamp()
         await history.store_message_async(
             room, direction, body, timestamp=stamp, sender=sender,
-            origin_id=stable_id, message_id=stable_id,
+            origin_id=stable_id, message_id=msg_id or stable_id,
             reply_to=reply_to, reply_id=reply_id, media=media,
             markup=markup, edited=True)
         chat = self._chat_window.get_chat(room)
@@ -13032,6 +13115,8 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._chat_window.current_jid() == jid:
             self._raise_chat_area()
             logger.debug("OSD[click] jid=%s already-current", jid)
+            QtCore.QTimer.singleShot(
+                0, lambda key=jid: self._refresh_visible_state(key))
             return
         if chat is not None and chat.anchor_restore_pending():
             self._raise_chat_area()

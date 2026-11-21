@@ -837,8 +837,9 @@ server when nothing is selected), non-modally. It has three tabs and one
   → `MainWindow._on_xmpp_uri`.
 
 Gateways (transports): an explicitly added no-`@` JID is shown in «Сервер»
-immediately and classified via `discover_service_info`
-(`category == "gateway"`); only a gateway is cached in `transports.json`, while
+immediately and classified via `discover_service_info` (any advertised
+identity with `category == "gateway"`); only a gateway is cached in
+`transports.json`, while
 a non-gateway stays in the profile's `servers.json`. `AddContactDialog` lists
 only those added transports in its service selector
 (`gateways=[(name, jid)]`, and can be opened with `preselect=<jid>`) so a contact
@@ -1416,7 +1417,9 @@ Single conversation tab. Layout:
   runs only while the view is on screen
   (`hideEvent` stops it, `showEvent` starts it) and while the application is
   active (`poll_allowed`), and skips the last-seen query
-  when the view is at the bottom. Incoming messages never force a scroll to the
+  when the view is at the bottom. The seen update runs when the poll is dirty
+  or the scroll offset changed, and a focus/OSD click forces a fresh
+  visible-ref read before `_apply_visible_unread`. Incoming messages never force a scroll to the
   bottom — only the user's own outgoing messages do — but a message appended
   while that just-requested bottom scroll is still pending keeps following it
   (`_follow_bottom`; an anchor restore still blocks the chase).
@@ -2657,7 +2660,11 @@ Registers XEP plugins (conditionally where noted):
   appended the same way (`_apply_or_append_correction`/
   `_apply_or_append_muc_correction`, logged `EDIT[orphan-live]`; an incoming
   one also bumps unread), so a duplicate is preferred over losing the new
-  version. Outgoing messages carry an XEP-0359 `<origin-id/>` equal to the
+  version. A join replay buffers an archived correction with its `replace_id`,
+  stores the originals first and applies the edits after the batch
+  (`_flush_muc_replay` → `_apply_mam_edits`); a MUC row also keeps the raw
+  stanza `id` in `message_id`, so a `<replace id>` naming it resolves.
+  Outgoing messages carry an XEP-0359 `<origin-id/>` equal to the
   stanza id so peers can target them reliably; a peer that uses its own local
   id (Monocles) cannot be matched and its correction lands as a new message.
   `replace_message` matches message/origin/archive/stanza ids.

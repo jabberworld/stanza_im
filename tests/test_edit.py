@@ -106,6 +106,18 @@ check("muc correction replaces",
       len(muc_corr) == 1 and muc_corr[0][0] == "room@conf"
       and muc_corr[0][1] == "muc-1" and not muc_new)
 
+arch_corr = []
+cm_arch = JabberClient("me@example.com/r", "pw", allow_incoming_edits=True)
+cm_arch.on("groupchat_message_corrected",
+           lambda *a, **k: arch_corr.append((a, k)))
+arch_msg = make_muc_corrected(body="archived edit", ref="raw-orig")
+ET.SubElement(arch_msg.xml, "{urn:xmpp:delay}delay").set(
+    "stamp", "2026-11-21T11:34:14.182052Z")
+cm_arch._on_groupchat_message(arch_msg)
+check("a delayed MUC correction is marked as archived",
+      arch_corr and arch_corr[0][1].get("archived") is True
+      and arch_corr[0][1].get("msg_id") == "cor-muc")
+
 # 4. chat widget edit flow (fallback view) ------------------------------------
 cw = ChatWidget("bob@example.com", "Bob", chat_themes.ChatThemeFactory())
 emitted = []
@@ -381,6 +393,33 @@ check("an orphan MUC correction is appended as an incoming message",
       muc_chat.added and muc_chat.added[0]["sender"] == "nick"
       and muc_chat.added[0]["direction"] == "incoming"
       and muc_chat.added[0]["edited"] is True)
+
+# A join replay can deliver the original and its correction before either is
+# in SQLite.  The correction must be applied after the original is stored.
+replay_win, replay_chat = _corr_win()
+replay_win._client = None
+replay_win._start_task = lambda coro: _run(coro)
+replay_win._chat_area_visible = lambda: False
+replay_win._muc_replay_buffers = {}
+replay_win._muc_replay_timers = {}
+replay_room = "replay-edit@conf.example"
+replay_win._buffer_muc_replay(
+    replay_room, "fanbass", "У меня на lus",
+    "2026-11-21T11:34:06.582576Z", "1795260846582576",
+    "1795260846582576", "1795260846582576", "", "", None, None,
+    msg_id="e4efbc20-4c9f-4572-afd4-db46dab2196e")
+replay_win._buffer_muc_replay(
+    replay_room, "fanbass", "У меня на lua",
+    "2026-11-21T11:34:14.182052Z", "1795260854182052",
+    "1795260854182052", "corr-stable", "", "", None, None,
+    msg_id="08bbf0d9-f336-4f56-913e-f33832e655e8",
+    replace_id="e4efbc20-4c9f-4572-afd4-db46dab2196e")
+replay_win._flush_muc_replay(replay_room)
+_replay_rows = history.load_history(replay_room)
+check("a delayed MUC correction replaces its original after the batch store",
+      len(_replay_rows) == 1
+      and _replay_rows[0]["body"] == "У меня на lua"
+      and _replay_rows[0]["edited"] is True)
 
 # 6. Edit menu JS routing present --------------------------------------------
 _view_src = open(os.path.join(

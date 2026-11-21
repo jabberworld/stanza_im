@@ -107,10 +107,13 @@ check("a delayed 1:1 message keeps its original timestamp",
 
 # 2. the replay is merged with a forced window reload ----------------------
 src = inspect.getsource(MainWindow._on_groupchat_message)
-check("a delay-only replay forces the window merge",
-      "schedule_tail_refresh(force=not archive_id)" in src)
+check("a delay-only replay is buffered instead of written row by row",
+      "_buffer_muc_replay" in src and "archived" in src)
+store_src = inspect.getsource(MainWindow._store_muc_replay)
+check("the stored replay forces the window merge",
+      "schedule_tail_refresh" in store_src)
 check("a user-scrolled-up tab is not force-refreshed",
-      'getattr(chat, "_user_scrolled_up", False)' in src)
+      'getattr(chat, "_user_scrolled_up", False)' in store_src)
 
 # 3. no MAM query for a room that does not advertise an archive ------------
 started = []

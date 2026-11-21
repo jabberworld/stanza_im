@@ -219,8 +219,16 @@ check("the scroll report applies the visible unread count",
 # While the read-anchor scroll is in flight the page still reports its
 # transient bottom position; trusting it cleared the whole unread block on
 # open (walkbook pravda: 13 -> 0 without scrolling).
-from stanza_im.ui.chat_view import anchor_scroll_guard_open  # noqa: E402
+from stanza_im.ui.chat_view import (  # noqa: E402
+    anchor_scroll_guard_open, scroll_offset_changed,
+)
 
+check("a real scroll offset change is detected without a dirty flag",
+      scroll_offset_changed(100.0, 140.0))
+check("an idle poll is not a scroll change",
+      not scroll_offset_changed(100.0, 100.5))
+check("no previous offset means no scroll change",
+      not scroll_offset_changed(None, 140.0))
 check("no anchor scroll means the guard is open",
       anchor_scroll_guard_open(None, [], 0.0))
 check("the guard opens once the anchor target is visible",
@@ -349,6 +357,35 @@ check("history excludes our own MUC echo from unread",
                                    exclude_sender="rain") == 1)
 check("history counts other MUC senders normally",
       history.count_incoming_after(room_jid, "2026-10-02T09:00:00Z") == 2)
+
+# Clicking an OSD for the already-current tab must reconcile the visible rows.
+from PyQt6 import QtWidgets  # noqa: E402
+
+_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+
+
+class _OsdChat:
+    def anchor_restore_pending(self):
+        return False
+
+
+class _OsdWindow:
+    def get_chat(self, _jid):
+        return _OsdChat()
+
+    def current_jid(self):
+        return "room@example"
+
+
+osd = MainWindow.__new__(MainWindow)
+osd._chat_window = _OsdWindow()
+osd._raise_chat_area = lambda: None
+refreshed = []
+osd._refresh_visible_state = lambda jid: refreshed.append(jid)
+MainWindow._osd_click(osd, "room@example")
+_app.processEvents()
+check("an OSD click on the current tab refreshes visible unread",
+      refreshed == ["room@example"])
 
 if FAILURES:
     print("FAILURES:", FAILURES)

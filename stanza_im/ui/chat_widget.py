@@ -3614,6 +3614,14 @@ class ChatWidget(QtWidgets.QWidget):
         if callable(updater):
             updater()
 
+    def refresh_visible_state(self) -> None:
+        """Re-read the viewport so focus/OSD can reconcile unread now."""
+        refresh = getattr(self._view, "refresh_visible_refs", None)
+        if callable(refresh):
+            refresh()
+            return
+        self._on_viewport_settled()
+
     def take_seen_move(self) -> bool:
         """Consume the one-shot divider-move permission from the last report."""
         move, self._seen_move_divider = self._seen_move_divider, False

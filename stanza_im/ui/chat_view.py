@@ -84,6 +84,17 @@ def anchor_update_action(previous_offset, offset, *, user_scrolled: bool,
         return "", True
     return "", bool(armed)
 
+def scroll_offset_changed(previous_offset, offset: float,
+                          threshold: float = 2.0) -> bool:
+    """Whether a scroll poll saw a real movement since the previous one."""
+    if previous_offset is None:
+        return False
+    try:
+        return abs(float(offset) - float(previous_offset)) >= threshold
+    except (TypeError, ValueError):
+        return False
+
+
 def anchor_scroll_guard_open(pending: dict | None, visible_refs,
                              now: float) -> bool:
     """Whether the read-anchor scroll guard may release the scroll reports.
@@ -1300,6 +1311,18 @@ if HAS_WEBENGINE:
         def _on_js_console(self, level, message: str, line: int, source: str):
             logger.debug("chat JS [%s:%s] %s", source, line, message)
 
+        _VISIBLE_REFS_JS_BODY = (
+            "var m=document.querySelectorAll('#chat .stanza-message');"
+            "var vh=window.innerHeight||0;var out=[];"
+            "for(var i=0;i<m.length;i++){var r=m[i].getBoundingClientRect();"
+            "if(r.bottom>0&&r.top<vh){var ids=[m[i].getAttribute('data-stanza-id'),"
+            "m[i].getAttribute('data-reply-id'),"
+            "m[i].getAttribute('data-stanza-sid')];"
+            "for(var j=0;j<ids.length;j++){if(ids[j])out.push(ids[j]);}}}"
+            "var result=JSON.stringify(out);"
+            "window.__stanzaVisibleCache=result;return result;"
+        )
+
         _SCROLL_JS = """
         (function installStanzaScroll() {
             if (!window.__stanzaUserScrollHooked) {
@@ -1346,6 +1369,29 @@ if HAS_WEBENGINE:
 
         def _install_scroll_js(self):
             self.page().runJavaScript(self._SCROLL_JS)
+
+        def refresh_visible_refs(self) -> None:
+            """Re-read the visible refs now (focus/OSD reconciliation)."""
+            def _done(result):
+                try:
+                    refs = json.loads(result)
+                    if isinstance(refs, list):
+                        self._visible_refs = [str(ref) for ref in refs if ref]
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    pass
+                try:
+                    self._maybe_emit_last_seen(force=True)
+                finally:
+                    self.viewport_settled.emit()
+            if not getattr(self, "_ready", False):
+                self.viewport_settled.emit()
+                return
+            try:
+                self.page().runJavaScript(
+                    "(function(){" + self._VISIBLE_REFS_JS_BODY + "})()",
+                    _done)
+            except RuntimeError:
+                self.viewport_settled.emit()
 
         _FABS_JS = """
         (function ensureStanzaFabs() {
@@ -2167,15 +2213,8 @@ window.__stanzaMentionRef = '';
                 " (function(){"
                 "if(!window.__stanzaScrollDirty && window.__stanzaVisibleCache)"
                 " return window.__stanzaVisibleCache;"
-                "var m=document.querySelectorAll('#chat .stanza-message');"
-                "var vh=window.innerHeight||0;var out=[];"
-                "for(var i=0;i<m.length;i++){var r=m[i].getBoundingClientRect();"
-                "if(r.bottom>0&&r.top<vh){var ids=[m[i].getAttribute('data-stanza-id'),"
-                "m[i].getAttribute('data-reply-id'),"
-                "m[i].getAttribute('data-stanza-sid')];"
-                "for(var j=0;j<ids.length;j++){if(ids[j])out.push(ids[j]);}}}"
-                "var result=JSON.stringify(out);"
-                "window.__stanzaVisibleCache=result;return result;})(),"
+                + self._VISIBLE_REFS_JS_BODY +
+                "})(),"
                 " window.__stanzaImageLoadRef || '',"
                 " window.__stanzaQuickRef || '',"
                 " (function(){var s=document.querySelector('#chat .stanza-unread');"
@@ -2587,6 +2626,8 @@ window.__stanzaMentionRef = '';
                 self._fraction = 1.0
             at_bottom = offset + viewport >= total - 2 or total <= viewport
             dirty = bool(len(value) > 33 and value[33])
+            offset_changed = scroll_offset_changed(
+                self._last_scroll_offset, offset)
             action, self._anchor_update_armed = anchor_update_action(
                 self._last_scroll_offset, offset,
                 user_scrolled=bool(self._user_scrolled),
@@ -2602,9 +2643,12 @@ window.__stanzaMentionRef = '';
                     self._maybe_emit_last_seen(force=True)
                 except Exception:
                     pass
-            elif dirty:
+            elif dirty or offset_changed:
                 # Keep the unread counter live on actual scroll/DOM changes,
-                # not on every idle poll.
+                # not on every idle poll.  The offset check also covers a
+                # scrollbar drag whose dirty flag was reset between two polls.
+                if offset_changed and not dirty:
+                    logger.debug("SEEN[poll] offset moved without dirty")
                 try:
                     self._maybe_emit_last_seen()
                 except Exception:

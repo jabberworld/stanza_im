@@ -3539,16 +3539,24 @@ class JabberClient:
                 if str(item.tag).endswith("item") and item.get("jid")]
 
     async def discover_service_info(self, service: str, node: str = "") -> dict:
-        """Return the first disco identity and feature list of a service."""
+        """Return the disco identities and feature list of a service.
+
+        A component may advertise several identities (e.g. a gateway that is
+        also a conference service), so callers that classify a service must
+        inspect every identity, not only the first one.
+        """
         try:
             info = await self.xmpp.plugin["xep_0030"].get_info(
                 jid=service, node=node or None)
         except Exception:
             return {"jid": service, "node": node, "name": service,
-                    "category": "", "type": "", "features": []}
+                    "category": "", "type": "", "features": [],
+                    "identities": [], "categories": [],
+                    "has_gateway": False}
         features = [str(f.get("var") or "") for f in info.xml.iter()
                     if str(f.tag).endswith("feature") and f.get("var")]
         name = ""
+        identities: list[dict] = []
         for element in info.xml.iter():
             if not str(element.tag).endswith("identity"):
                 continue
@@ -3558,11 +3566,15 @@ class JabberClient:
             if name == "" and value:
                 name = value
             if category:
-                return {"jid": service, "node": node, "name": name or service,
-                        "category": category, "type": type_,
-                        "features": features}
+                identities.append({"category": category, "type": type_,
+                                   "name": value})
+        categories = sorted({item["category"] for item in identities})
+        first = identities[0] if identities else {"category": "", "type": ""}
         return {"jid": service, "node": node, "name": name or service,
-                "category": "", "type": "", "features": features}
+                "category": first["category"], "type": first["type"],
+                "features": features, "identities": identities,
+                "categories": categories,
+                "has_gateway": "gateway" in categories}
 
     # ── Service actions: registration / search / ad-hoc commands ───────
 
@@ -7365,11 +7377,12 @@ class JabberClient:
         # without a <stanza-id>, and the replay/MAM/live copies of one message
         # must share a stable id so the history dedups them.
         server_sid = _stanza_id(msg, room)
+        msg_id = str(msg.get("id") or "")
         stable_id = _origin_id(msg) or server_sid
         if not stable_id and archived and archive_id:
             stable_id = archive_id
         if not stable_id:
-            stable_id = str(msg.get("id") or "")
+            stable_id = msg_id
         if server_sid or stable_id:
             self._mds_track(room, msg, server_sid or stable_id)
         media = message_media(msg)
@@ -7381,14 +7394,14 @@ class JabberClient:
                 self.emit("groupchat_message_corrected",
                           room, replace_ref, body, ts, unstyled,
                           stable_id, frm, reply_to, reply_id, media=media,
-                          markup=markup)
+                          markup=markup, archived=archived, msg_id=msg_id)
                 return
             logger.debug("Incoming MUC correction ignored (edits disabled)")
         self.emit("groupchat_message", room, nick, body, ts, archived,
                   archive_id, unstyled, stable_id, frm, reply_to, reply_id,
                   media=media, encrypted=self._omemo_flag(msg), markup=markup,
                   urgency=_shim_urgency(msg), stanza_id=server_sid,
-                  quick_response=quick)
+                  quick_response=quick, msg_id=msg_id)
 
     def _room_pm_occupant(self, frm: str, msg) -> tuple[str, str] | None:
         """Occupant ``(room, nick)`` of a room PM relayed from the real JID.
@@ -9123,6 +9136,7 @@ class JabberClient:
                     "archive_id": _archive_result_id(result),
                     "stanza_id": server_sid,
                     "origin_id": stable,
+                    "message_id": str(msg.get("id") or "") or stable,
                     "reply_to": _reply_reference(msg)[0],
                     "reply_id": _reply_reference(msg)[1],
                     "retracted": bool(tomb_id),
