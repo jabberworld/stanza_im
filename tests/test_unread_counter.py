@@ -3,6 +3,7 @@
 Run with:
     QT_QPA_PLATFORM=offscreen python3 tests/test_unread_counter.py
 """
+import inspect
 import os
 import sys
 import tempfile
@@ -229,6 +230,14 @@ check("an idle poll is not a scroll change",
       not scroll_offset_changed(100.0, 100.5))
 check("no previous offset means no scroll change",
       not scroll_offset_changed(None, 140.0))
+from stanza_im.ui import chat_view as chat_view_module  # noqa: E402
+
+_view_src = inspect.getsource(chat_view_module.ChatView)
+check("the visible-ref cache is keyed by the scroll offset",
+      "__stanzaVisibleCacheY" in _view_src)
+check("the scroll listener is installed before the bridge setup",
+      _view_src.index("addEventListener('scroll'")
+      < _view_src.index("if (!window.bridge)"))
 check("no anchor scroll means the guard is open",
       anchor_scroll_guard_open(None, [], 0.0))
 check("the guard opens once the anchor target is visible",

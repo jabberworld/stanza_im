@@ -1312,6 +1312,8 @@ if HAS_WEBENGINE:
             logger.debug("chat JS [%s:%s] %s", source, line, message)
 
         _VISIBLE_REFS_JS_BODY = (
+            "var y=window.scrollY||document.documentElement.scrollTop"
+            "||document.body.scrollTop||0;"
             "var m=document.querySelectorAll('#chat .stanza-message');"
             "var vh=window.innerHeight||0;var out=[];"
             "for(var i=0;i<m.length;i++){var r=m[i].getBoundingClientRect();"
@@ -1320,7 +1322,8 @@ if HAS_WEBENGINE:
             "m[i].getAttribute('data-stanza-sid')];"
             "for(var j=0;j<ids.length;j++){if(ids[j])out.push(ids[j]);}}}"
             "var result=JSON.stringify(out);"
-            "window.__stanzaVisibleCache=result;return result;"
+            "window.__stanzaVisibleCache=result;"
+            "window.__stanzaVisibleCacheY=y;return result;"
         )
 
         _SCROLL_JS = """
@@ -1338,32 +1341,33 @@ if HAS_WEBENGINE:
                                         {passive: true});
                 window.addEventListener('keydown', markUserScroll, true);
             }
-            if (window.__stanzaScrollInstalled) return;
+            if (!window.__stanzaScrollInstalled) {
+                window.__stanzaScrollInstalled = true;
+                var last = 0;
+                window.addEventListener('scroll', function () {
+                    window.__stanzaScrollDirty = 1;
+                    var now = Date.now();
+                    if (now - last < 120) return;
+                    last = now;
+                    if (!window.bridge) return;
+                    var st = window.scrollY || 0;
+                    var sh = document.body.scrollHeight;
+                    var ih = window.innerHeight;
+                    var max = Math.max(1, sh - ih);
+                    window.bridge.on_scroll_fraction(Math.min(1, st / max));
+                    if (st <= ih) window.bridge.on_near_top();
+                });
+            }
             if (!window.bridge) {
                 if (window.QWebChannel && window.qt && qt.webChannelTransport) {
                     new QWebChannel(qt.webChannelTransport, function (channel) {
                         window.bridge = channel.objects.bridge;
                         installStanzaScroll();
                     });
-                    return;
+                } else {
+                    window.setTimeout(installStanzaScroll, 50);
                 }
-                window.setTimeout(installStanzaScroll, 50);
-                return;
             }
-            window.__stanzaScrollInstalled = true;
-            var last = 0;
-            window.addEventListener('scroll', function () {
-                window.__stanzaScrollDirty = 1;
-                var now = Date.now();
-                if (now - last < 120) return;
-                last = now;
-                var st = window.scrollY || 0;
-                var sh = document.body.scrollHeight;
-                var ih = window.innerHeight;
-                var max = Math.max(1, sh - ih);
-                window.bridge.on_scroll_fraction(Math.min(1, st / max));
-                if (st <= ih) window.bridge.on_near_top();
-            });
         })();
         """
 
@@ -2211,7 +2215,10 @@ window.__stanzaMentionRef = '';
                 " window.innerWidth || 0,"
                 " window.devicePixelRatio || 0,"
                 " (function(){"
-                "if(!window.__stanzaScrollDirty && window.__stanzaVisibleCache)"
+                "var y=window.scrollY||document.documentElement.scrollTop"
+                "||document.body.scrollTop||0;"
+                "if(!window.__stanzaScrollDirty && window.__stanzaVisibleCache"
+                " && window.__stanzaVisibleCacheY===y)"
                 " return window.__stanzaVisibleCache;"
                 + self._VISIBLE_REFS_JS_BODY +
                 "})(),"

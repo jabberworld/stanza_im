@@ -1539,7 +1539,10 @@ skips the `runJavaScript`, so a background window does not churn IPC/JS), so
 background tabs are never polled; the last-seen query is skipped while the view
 sits at the bottom. A `__stanzaScrollDirty` flag set by real scrolls/DOM
 appends lets an idle poll reuse `__stanzaVisibleCache` instead of scanning
-every `.stanza-message`; the seen/unread update runs when the poll is dirty
+every `.stanza-message`; the cache is keyed by the current scroll Y
+(`__stanzaVisibleCacheY`), so a stale list is never reused after the offset
+moved. The scroll listener is installed before the WebChannel bridge wait and
+always sets the dirty flag. The seen/unread update runs when the poll is dirty
 **or the scroll offset actually changed** (a scrollbar drag whose flag was
 reset between polls). A focus/OSD click also forces a fresh visible-ref read
 (`ChatView.refresh_visible_refs`) before `_apply_visible_unread`, so a shown

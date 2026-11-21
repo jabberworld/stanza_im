@@ -1417,8 +1417,10 @@ Single conversation tab. Layout:
   runs only while the view is on screen
   (`hideEvent` stops it, `showEvent` starts it) and while the application is
   active (`poll_allowed`), and skips the last-seen query
-  when the view is at the bottom. The seen update runs when the poll is dirty
-  or the scroll offset changed, and a focus/OSD click forces a fresh
+  when the view is at the bottom. The visible-ref cache is keyed by scroll Y,
+  and the scroll listener is installed before the WebChannel bridge wait, so a
+  moved viewport cannot reuse a stale list. The seen update runs when the poll
+  is dirty or the scroll offset changed, and a focus/OSD click forces a fresh
   visible-ref read before `_apply_visible_unread`. Incoming messages never force a scroll to the
   bottom — only the user's own outgoing messages do — but a message appended
   while that just-requested bottom scroll is still pending keeps following it
