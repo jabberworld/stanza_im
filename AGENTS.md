@@ -1551,7 +1551,10 @@ always sets the dirty flag. The seen/unread update runs when the poll is dirty
 **or the scroll offset actually changed** (a scrollbar drag whose flag was
 reset between polls). A focus/OSD click also forces a fresh visible-ref read
 (`ChatView.refresh_visible_refs`) before `_apply_visible_unread`, so a shown
-message cannot stay unread. The
+message cannot stay unread. Near-top history paging yields while the
+read-anchor restore is pending, and `on_near_top` is emitted only for a real
+user scroll (programmatic `scrollIntoView` is marked separately), so prepending
+older rows cannot move the restored anchor. The
 `▼` shares a centred
 bottom row (`#stanza-fabs` / `_position_fab_buttons`) with the mention `@`
 button (left) and the reaction `♥` button (right, see below); all three labels

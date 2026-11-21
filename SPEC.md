@@ -1422,7 +1422,10 @@ Single conversation tab. Layout:
   and the scroll listener is installed before the WebChannel bridge wait, so a
   moved viewport cannot reuse a stale list. The seen update runs when the poll
   is dirty or the scroll offset changed, and a focus/OSD click forces a fresh
-  visible-ref read before `_apply_visible_unread`. Incoming messages never force a scroll to the
+  visible-ref read before `_apply_visible_unread`. Near-top paging yields while
+  the read-anchor restore is pending, and `on_near_top` fires only for a real
+  user scroll (programmatic `scrollIntoView` is marked separately), so prepending
+  older rows cannot move the restored anchor. Incoming messages never force a scroll to the
   bottom — only the user's own outgoing messages do — but a message appended
   while that just-requested bottom scroll is still pending keeps following it
   (`_follow_bottom`; an anchor restore still blocks the chase).

@@ -3936,6 +3936,11 @@ class ChatWidget(QtWidgets.QWidget):
         if (not self._initial_load_done or self._hist_loading
                 or self._server_fetching):
             return
+        if (self.anchor_restore_pending()
+                or getattr(self._view, "_deferred_scroll", None) is not None):
+            # The read-anchor resume owns the viewport.  Prepending history
+            # now would move the anchor before the user can see it.
+            return
         if self._cleared:
             if self._server_archive_available:
                 self.load_more_from_server()
@@ -3956,6 +3961,9 @@ class ChatWidget(QtWidgets.QWidget):
             rows = await history.load_older_timestamp_async(
                 self.jid, before_ts, self._batch_size())
             if self._released:
+                return
+            if self.anchor_restore_pending():
+                self._hist_loading = False
                 return
             exhausted = not rows
             if rows:
@@ -4155,6 +4163,8 @@ class ChatWidget(QtWidgets.QWidget):
             self._server_fetching, self._initial_load_done)
         if (not self._initial_load_done or self._hist_loading
                 or self._server_fetching):
+            return
+        if self._restore_anchor or self.anchor_restore_pending():
             return
         self._load_older_batch()
 

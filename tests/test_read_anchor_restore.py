@@ -79,6 +79,8 @@ class _View:
         self.mention_count = 0
         self.unseen_count = None
         self.unseen_target = None
+        self._deferred_scroll = None
+        self._scroll_suspended = False
 
     def clear(self):
         self.cleared += 1
@@ -882,6 +884,36 @@ check("a pending anchor scroll is not at bottom", not _bw.at_bottom())
 _bw._view._anchor_scroll = None
 _bw._view._deferred_scroll = ("message", "m-1", False, "")
 check("a parked document scroll is not at bottom", not _bw.at_bottom())
+
+# 20. near-top paging must not move the viewport during the anchor restore --
+_older_src = method_source(_cw_src, "_load_older_batch")
+_near_src = method_source(_cw_src, "_on_near_top")
+check("older paging yields to the anchor restore",
+      "anchor_restore_pending" in _older_src)
+check("near-top paging yields to the anchor restore",
+      "anchor_restore_pending" in _near_src)
+check("near-top is emitted only for a user scroll",
+      "st <= ih && window.__stanzaUserScrolled" in _cv_src)
+check("programmatic scrolls are marked separately",
+      "__stanzaProgrammaticScroll" in _cv_src)
+
+_aw = widget()
+_aw._initial_load_done = True
+_aw._hist_loading = False
+_aw._server_fetching = False
+_aw._db_exhausted = False
+_aw._restore_anchor = {"ts": "2026-10-02T10:03:00Z"}
+_aw._started = []
+_aw._start_task = lambda coro: _aw._started.append(coro)
+_aw._load_older_batch()
+check("older paging waits while the anchor is still restoring",
+      _aw._started == [])
+
+_aw._restore_anchor = {}
+_aw._view._scroll_suspended = True
+_aw._load_older_batch()
+check("older paging waits while a programmatic scroll is suspended",
+      _aw._started == [])
 
 print()
 if FAILURES:

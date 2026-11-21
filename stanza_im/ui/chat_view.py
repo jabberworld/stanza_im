@@ -1331,6 +1331,7 @@ if HAS_WEBENGINE:
             if (!window.__stanzaUserScrollHooked) {
                 window.__stanzaUserScrollHooked = true;
                 window.__stanzaUserScrolled = 0;
+                window.__stanzaProgrammaticScroll = 0;
                 window.__stanzaScrollDirty = 1;
                 var markUserScroll = function () {
                     window.__stanzaUserScrolled = 1;
@@ -1346,6 +1347,9 @@ if HAS_WEBENGINE:
                 var last = 0;
                 window.addEventListener('scroll', function () {
                     window.__stanzaScrollDirty = 1;
+                    if (!window.__stanzaProgrammaticScroll) {
+                        window.__stanzaUserScrolled = 1;
+                    }
                     var now = Date.now();
                     if (now - last < 120) return;
                     last = now;
@@ -1355,7 +1359,9 @@ if HAS_WEBENGINE:
                     var ih = window.innerHeight;
                     var max = Math.max(1, sh - ih);
                     window.bridge.on_scroll_fraction(Math.min(1, st / max));
-                    if (st <= ih) window.bridge.on_near_top();
+                    if (st <= ih && window.__stanzaUserScrolled) {
+                        window.bridge.on_near_top();
+                    }
                 });
             }
             if (!window.bridge) {
@@ -3187,7 +3193,11 @@ window.__stanzaMentionRef = '';
                     Math.max(4, window.innerWidth / 2),
                     Math.max(4, window.innerHeight / 2)) : null;
                 var anchorTop = anchor ? anchor.getBoundingClientRect().top : 0;
+                window.__stanzaProgrammaticScroll = 1;
                 chat.insertAdjacentHTML('afterbegin', {safe});
+                window.setTimeout(function () {{
+                    window.__stanzaProgrammaticScroll = 0;
+                }}, 350);
                 if (!keep) return;
                 function restoreAnchor() {{
                     if (!anchor) return;
@@ -3419,7 +3429,11 @@ window.__stanzaMentionRef = '';
                 }}
                 if (!target) return {{ref: ''}};
                 window.__stanzaScrollDirty = 1;
+                window.__stanzaProgrammaticScroll = 1;
                 target.scrollIntoView({{block: 'center'}});
+                window.setTimeout(function () {{
+                    window.__stanzaProgrammaticScroll = 0;
+                }}, 300);
                 return {{ref: target.getAttribute('data-stanza-id')
                     || target.getAttribute('data-reply-id') || ''}};
             }})();
@@ -3456,7 +3470,11 @@ window.__stanzaMentionRef = '';
                     }}
                 }}
                 if (!target) return {{ref: ''}};
+                window.__stanzaProgrammaticScroll = 1;
                 target.scrollIntoView({{block: 'center'}});
+                window.setTimeout(function () {{
+                    window.__stanzaProgrammaticScroll = 0;
+                }}, 300);
                 if (matched && flash) {{
                     target.classList.remove('stanza-jump-highlight');
                     void target.offsetWidth;
