@@ -41,12 +41,22 @@ def check(name, cond):
 
 
 def _png_bytes():
-    image = QtGui.QImage(6, 4, QtGui.QImage.Format.Format_RGB32)
+    return _png_size(6, 4)
+
+
+def _png_size(width, height):
+    image = QtGui.QImage(width, height, QtGui.QImage.Format.Format_RGB32)
     image.fill(QtCore.Qt.GlobalColor.red)
     buf = QtCore.QBuffer()
     buf.open(QtCore.QIODevice.OpenModeFlag.WriteOnly)
     image.save(buf, "PNG")
     return bytes(buf.data())
+
+
+def _image_size(raw):
+    image = QtGui.QImage()
+    image.loadFromData(raw)
+    return image.width(), image.height()
 
 
 # 1. kind detection -----------------------------------------------------------
@@ -141,8 +151,14 @@ service.set_size(180)
 service.set_mode("all")
 img_html = service.markup(url)
 check("image markup embed", img_html and "stanza:view:image/" in img_html
-      and "data:image/png;base64," in img_html and 'width="180"' in img_html
-      and 'max-width:180px' in img_html and 'max-height:180px' in img_html)
+      and "data:image/png;base64," in img_html
+      and 'width="180"' not in img_html
+      and 'max-width:180px' in img_html and 'max-height:180px' in img_html
+      and "width:auto;height:auto" in img_html)
+check("landscape thumbnails keep their aspect ratio",
+      _image_size(service._make_thumb(_png_size(600, 300))) == (180, 90))
+check("portrait thumbnails keep their aspect ratio",
+      _image_size(service._make_thumb(_png_size(300, 600))) == (90, 180))
 audio_html = service.markup("https://h/a/song.mp3")
 check("audio markup", audio_html and "<audio" in audio_html
       and 'data-media-url="https://h/a/song.mp3"' in audio_html)
