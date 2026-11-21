@@ -3875,8 +3875,9 @@ the preview cache TTL/limit, the MUC mention highlight mode and the
 chat tabs and the window title, default on). `Apply` applies
 settings without closing the dialog. Chat shortcuts include Enter/Ctrl+Enter, Esc,
 Up (empty input) to reply to the last incoming message, Down to cancel an
-untouched reply, Ctrl+Up to edit the last own message, Ctrl+PgUp/Ctrl+PgDown,
-Ctrl+1..9 and Ctrl+W; Esc also closes the media viewer. Contact context menus
+untouched reply, Ctrl+Up to edit the last own message, Ctrl+Down to cancel that
+edit, Ctrl+PgUp/Ctrl+PgDown, Ctrl+1..9 and Ctrl+W; Esc also closes the media
+viewer. Contact context menus
 provide
 checkable group assignment and creation of new groups. Appearance → «Разное»
 also selects the interface mode (`appearance.interface_mode`): `separate`

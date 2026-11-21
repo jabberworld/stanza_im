@@ -117,6 +117,10 @@ cw6.add_message(sender="Me", body="editable", timestamp="10:00",
 check("ctrl+up consumed", press_up(cw6, ctrl=True) is True)
 check("edit started", cw6._editing_id == "edit-6"
       and cw6._input.toPlainText() == "editable")
+cw6._input.setPlainText("changed text")
+check("ctrl+down consumed while editing", press_down(cw6, ctrl=True) is True)
+check("ctrl+down cancels the edit",
+      cw6._editing_id == "" and cw6._input.toPlainText() == "")
 
 # 8. Down cancels a reply the user has not started typing ---------------------
 cw7 = new_widget()

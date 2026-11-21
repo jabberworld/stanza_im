@@ -1491,6 +1491,12 @@ class ChatWidget(QtWidgets.QWidget):
                     and not self._input.toPlainText()
                     and self._reply_to_last()):
                 return True
+            if (event.key() == QtCore.Qt.Key.Key_Down and has_ctrl
+                    and not modifiers & QtCore.Qt.KeyboardModifier.AltModifier
+                    and not modifiers & QtCore.Qt.KeyboardModifier.ShiftModifier
+                    and self._editing_id):
+                self._cancel_edit()
+                return True
             if (event.key() == QtCore.Qt.Key.Key_Down
                     and not has_ctrl
                     and not modifiers & QtCore.Qt.KeyboardModifier.AltModifier

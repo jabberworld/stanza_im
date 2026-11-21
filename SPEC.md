@@ -2636,7 +2636,8 @@ Registers XEP plugins (conditionally where noted):
 ### 14.4 Last Message Correction (XEP-0308)
 
 - Any own message can be edited: Ctrl+Up in the input starts editing the last
-  one, and the message menu adds "Edit" for our own messages. Edit requests are
+  one, Ctrl+Down cancels an active edit, and the message menu adds "Edit" for
+  our own messages. Edit requests are
   **not** routed through in-page navigation (which resets the chat document in
   some WebEngine setups): the menu button stores the referenced id in
   `window.__stanzaEditRef`, the always-running scroll poll
