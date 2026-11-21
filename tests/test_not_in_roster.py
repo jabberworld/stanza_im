@@ -117,6 +117,19 @@ checks.extend([
     ("the session set is pruned", jid not in win._not_in_roster),
 ])
 
+# An old no-@ roster item without groups/subscription is not a contact.
+legacy = "jabberworld.info"
+win._add_roster_item({"jid": legacy, "name": "", "groups": [],
+                      "subscription": "none"})
+checks.extend([
+    ("a no-@ roster residue appears in «Не в списке»",
+     any(u.jid == legacy and u.group == group
+         for u in win._roster._users)),
+    ("a no-@ roster residue is not an ordinary contact",
+     not any(u.jid == legacy and u.group != group
+             for u in win._roster._users)),
+])
+
 # An unknown server JID starts in «Не в списке», never in Transports.
 server = "xmpp.example.org"
 win._track_not_in_roster(server)

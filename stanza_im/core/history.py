@@ -1201,17 +1201,25 @@ def count_messages(jid: str) -> int:
         return 0
 
 
-def count_incoming_after(jid: str, timestamp: str) -> int:
-    """Incoming messages stored strictly after *timestamp* (unread block)."""
+def count_incoming_after(jid: str, timestamp: str,
+                         exclude_sender: str = "") -> int:
+    """Incoming messages stored strictly after *timestamp* (unread block).
+
+    *exclude_sender* drops our own MUC echo: a conference server relays our
+    groupchat message back as ``direction='incoming'`` with our nick as sender,
+    and it must never create an unread block.
+    """
     if not timestamp:
         return 0
     try:
         with _lock:
             conn = _connection(jid)
+            sender = str(exclude_sender or "")
             row = conn.execute(
                 "SELECT COUNT(*) FROM messages "
-                "WHERE direction = 'incoming' AND timestamp > ?",
-                (str(timestamp),)).fetchone()
+                "WHERE direction = 'incoming' AND timestamp > ? "
+                "AND (? = '' OR sender <> ?)",
+                (str(timestamp), sender, sender)).fetchone()
             return int(row[0]) if row else 0
     except sqlite3.Error:
         return 0
@@ -1538,8 +1546,10 @@ async def timestamp_for_server_ref_async(jid: str, stable_id: str) -> str:
     return await asyncio.to_thread(timestamp_for_server_ref, jid, stable_id)
 
 
-async def count_incoming_after_async(jid: str, timestamp: str) -> int:
-    return await asyncio.to_thread(count_incoming_after, jid, timestamp)
+async def count_incoming_after_async(jid: str, timestamp: str,
+                                     exclude_sender: str = "") -> int:
+    return await asyncio.to_thread(
+        count_incoming_after, jid, timestamp, exclude_sender)
 
 
 async def message_exists_async(jid: str, stable_id: str) -> bool:

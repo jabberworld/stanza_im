@@ -232,6 +232,18 @@ check("a known avatar from the previous state wins",
                               "avatar_jid": "real@x"})
       == ("/x.png", "real@x"))
 
+# A cached room avatar file (not a participant) is enough for the roster row.
+win._muc_avatar_paths = {}
+win._client = SimpleNamespace(get_contact=lambda _jid: None)
+room_avatar = save_avatar(room, raw)
+check("a cached room avatar is resolved without a vCard",
+      win._room_avatar_path(room) == room_avatar)
+sync_src = inspect.getsource(MainWindow._sync_conference_roster)
+check("the conference row resolves the cached room avatar",
+      "_room_avatar_path(" in sync_src)
+check("a room without an avatar requests its vCard once",
+      "_request_vcard(room)" in sync_src)
+
 if FAILURES:
     print("FAILURES:", FAILURES)
     sys.exit(1)

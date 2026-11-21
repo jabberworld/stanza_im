@@ -563,6 +563,12 @@ class ChatWidget(QtWidgets.QWidget):
         self._render_cache_settings = ""
         self._status_lines: list[tuple[str, str]] = []
         self._messages: list[dict] = []
+        # Session-only delivery/read marks.  They must survive a re-render
+        # (resume, theme/font change, history reload) even when the entry
+        # object itself is replaced.
+        self._delivered_refs: set[str] = set()
+        self._read_refs: set[str] = set()
+        self._read_by_refs: dict[str, list[str]] = {}
         self._quick_response_refs: set[str] = set()
         self._quick_response_used_refs: set[str] = set()
         # Stable keys of the message nodes currently known to be in the
@@ -1702,7 +1708,7 @@ class ChatWidget(QtWidgets.QWidget):
             if entry.get("direction") != "incoming" or self._is_mine(entry):
                 continue
             sender = str(entry.get("sender") or "")
-            if sender and sender == self._self_nick:
+            if sender and self._same_nick(sender, self._self_nick):
                 continue
             if mentions_nick(str(entry.get("body") or ""), self._self_nick):
                 count += 1
@@ -1710,8 +1716,22 @@ class ChatWidget(QtWidgets.QWidget):
                      boundary_ts, seen_ts, count)
         return count
 
+    def _unread_entry_refs(self, entry: dict) -> set[str]:
+        """Every stable id an unread row can be recognised by in the DOM.
+
+        A MUC message often has different values for ``origin_id`` (client
+        UUID), ``stanza_id`` (server id) and the rendered ``data-stanza-id``.
+        Matching only the preferred reply id made visible unread impossible to
+        subtract when the DOM exposed the server id instead.
+        """
+        refs = {
+            str(entry.get(key) or "")
+            for key in ("origin_id", "archive_id", "stanza_id", "message_id")
+        } - {""}
+        return refs or {"ts:" + str(entry.get("timestamp") or "")}
+
     def _unread_entry_ref(self, entry: dict) -> str:
-        """Stable ref used by the unread set (falls back to the timestamp)."""
+        """Primary stable ref used for stored seen/boundary points."""
         ref = self._reply_target_id(entry)
         if ref:
             return ref
@@ -1749,9 +1769,9 @@ class ChatWidget(QtWidgets.QWidget):
         visible = self.visible_refs()
         topmost = None
         for entry in block:
-            ref = self._unread_entry_ref(entry)
-            if ref in visible:
-                self._seen_unread_refs.add(ref)
+            refs = self._unread_entry_refs(entry)
+            if refs & visible:
+                self._seen_unread_refs.update(refs)
                 if topmost is None:
                     topmost = entry
         if topmost is not None:
@@ -1767,7 +1787,8 @@ class ChatWidget(QtWidgets.QWidget):
                 "sid": self._seen_sid}
         remaining = [
             entry for entry in block
-            if self._unread_entry_ref(entry) not in self._seen_unread_refs]
+            if not (self._unread_entry_refs(entry)
+                    & self._seen_unread_refs)]
         if remaining and move_divider:
             move = getattr(self._view, "move_unread_separator", None)
             target = self._reply_target_id(remaining[0])
@@ -1787,13 +1808,13 @@ class ChatWidget(QtWidgets.QWidget):
         visible = self.visible_refs()
         remaining = 0
         for entry in self.unread_block():
-            ref = self._unread_entry_ref(entry)
-            if ref in visible:
-                self._seen_mention_refs.add(ref)
+            refs = self._unread_entry_refs(entry)
+            if refs & visible:
+                self._seen_mention_refs.update(refs)
             if entry.get("sender") == self._self_nick:
                 continue
             if mentions_nick(str(entry.get("body") or ""), self._self_nick):
-                if ref not in self._seen_mention_refs:
+                if not (refs & self._seen_mention_refs):
                     remaining += 1
         return remaining
 
@@ -2000,7 +2021,8 @@ class ChatWidget(QtWidgets.QWidget):
         if entry.get("direction") == "outgoing":
             return True
         return bool(self.is_muc and self._self_nick
-                    and entry.get("sender") == self._self_nick)
+                    and self._same_nick(entry.get("sender", ""),
+                                        self._self_nick))
 
     def _can_moderate_entry(self, entry: dict) -> bool:
         """True when a XEP-0425 moderation action may be offered for *entry*.
@@ -2325,7 +2347,8 @@ class ChatWidget(QtWidgets.QWidget):
                 self._quick_response_ref(entry)
                 in self._quick_response_refs),
             "quick_response_ref": self._quick_response_ref(entry),
-            "read_title": self._read_receipt_title(entry),
+            "read_title": self._read_title_for_entry(entry),
+            "delivered": self._delivered_for_entry(entry),
         }
 
     def compute_reactions(self, entry: dict) -> list[dict]:
@@ -2555,7 +2578,11 @@ class ChatWidget(QtWidgets.QWidget):
         if (prepared and (len(prepared) != len(entries)
                           or self._prepared_settings != current_settings
                           or not getattr(self._view, "supports_prepared",
-                                         False))):
+                                         False)
+                          or self.__dict__.get("_delivered_refs", set())
+                          or self.__dict__.get("_read_refs", set()))):
+            # Session marks are post-render state; a prepared fragment would
+            # otherwise hide a delivered/read marker after a resume.
             prepared = []
         self._prepared_html = []
         fragments: list[str] = []
@@ -3485,15 +3512,18 @@ class ChatWidget(QtWidgets.QWidget):
                 entry, anchor_restore=True, highlight=False):
             self._flash_first_unread()
             return
-        # The anchor message is outside the loaded window: fall back to its
-        # timestamp, and only then walk the local archive page by page.
+        # The anchor id is outside the loaded window.  Walk the local archive
+        # for that exact id before trusting the timestamp: an older message at
+        # or before the anchor timestamp would otherwise become the anchor and
+        # the real unread block stays below the viewport (the floating button
+        # found it only after its own ref-based jump).
+        if ref:
+            self._jump_to_message(ref, fallback_unread=True)
+            return
         entry = self._entry_before_or_at(str(anchor.get("ts") or ""))
         if entry is not None and self._scroll_to_entry(
                 entry, anchor_restore=True, highlight=False):
             self._flash_first_unread()
-            return
-        if ref:
-            self._jump_to_message(ref, fallback_unread=True)
             return
         # Nothing to page back to: open at the start of the unread block
         # instead of the newest message.  Scrolling to the bottom here marked
@@ -3638,6 +3668,8 @@ class ChatWidget(QtWidgets.QWidget):
                 "outgoing": self._is_mine(entry),
                 "edited": bool(entry.get("edited")),
                 "moderatable": self._can_moderate_entry(entry),
+                "read_title": self._read_title_for_entry(entry),
+                "delivered": self._delivered_for_entry(entry),
             })
         return out
 
@@ -5066,14 +5098,49 @@ class ChatWidget(QtWidgets.QWidget):
         self._text_scale = factor
         self._view.set_chat_zoom(self._text_scale)
 
+    def _mark_refs(self, entry: dict) -> set[str]:
+        return self._unread_entry_refs(entry)
+
+    def _delivered_for_entry(self, entry: dict) -> bool:
+        return bool(entry.get("delivered")
+                    or (self._mark_refs(entry)
+                        & self.__dict__.get("_delivered_refs", set())))
+
+    def _read_viewers_for(self, entry: dict) -> list[str]:
+        viewers = [str(v) for v in (entry.get("read_by") or []) if v]
+        for ref in self._mark_refs(entry):
+            for viewer in self.__dict__.get("_read_by_refs", {}).get(ref, []):
+                if viewer and viewer not in viewers:
+                    viewers.append(viewer)
+        return viewers
+
+    def _read_state_for(self, entry: dict) -> bool:
+        return bool(entry.get("_read_seen") or entry.get("read_by")
+                    or (self._mark_refs(entry)
+                        & self.__dict__.get("_read_refs", set())))
+
+    def _read_title_for_entry(self, entry: dict) -> str:
+        if not self._read_state_for(entry):
+            return ""
+        viewers = self._read_viewers_for(entry)
+        if self.is_muc or entry.get("_read_chat") == "muc":
+            title = self._read_receipt_title(
+                {"read_by": viewers, "_read_chat": "muc"})
+            return title or tr("msg_read_seen")
+        return tr("msg_read_seen")
+
     def mark_delivered(self, message_id: str) -> None:
         if not message_id:
             return
-        for entry in reversed(self._messages):
-            if entry.get("message_id") == message_id:
-                entry["delivered"] = True
-                self._view.mark_message_delivered(message_id)
-                return
+        entry = self._find_message(message_id)
+        delivered = self.__dict__.setdefault("_delivered_refs", set())
+        if entry is not None:
+            refs = self._mark_refs(entry)
+            delivered.update(refs)
+            entry["delivered"] = True
+        else:
+            delivered.add(str(message_id))
+        self._view.mark_message_delivered(message_id)
 
     @staticmethod
     def _read_receipt_title(entry: dict) -> str:
@@ -5105,9 +5172,16 @@ class ChatWidget(QtWidgets.QWidget):
         if viewer and viewer not in viewers:
             viewers.append(viewer)
         entry["read_by"] = viewers
+        entry["_read_seen"] = True
         if self.is_muc:
             entry["_read_chat"] = "muc"
-        title = self._read_receipt_title(entry)
+        refs = self._mark_refs(entry) | {str(ref)}
+        read_refs = self.__dict__.setdefault("_read_refs", set())
+        read_by_refs = self.__dict__.setdefault("_read_by_refs", {})
+        read_refs.update(refs)
+        for item_ref in refs:
+            read_by_refs[item_ref] = list(viewers)
+        title = self._read_title_for_entry(entry)
         self._view.mark_message_read(ref, title)
         logger.debug("READ[mark] jid=%s ref=%s viewer=%s title=%r",
                      self.jid, ref, viewer, title)

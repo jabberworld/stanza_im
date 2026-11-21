@@ -110,8 +110,16 @@ check("outgoing HTML carries the tooltip", 'title="Seen"' in out)
 check("incoming HTML never carries the eye", "read-receipt" not in inc)
 plain = ChatThemeFactory().render_message("Me", "hello", "10:00", "outgoing")
 check("an unread outgoing message carries no eye", "read-receipt" not in plain)
-check("the read eye is a block below the timestamp",
-      ".read-receipt { display: block;" in chat_themes._UNREAD_CSS)
+both = ChatThemeFactory().render_message("Me", "hello", "10:00", "outgoing",
+                                         read_title="Seen", delivered=True)
+check("the eye is rendered before the delivery check",
+      both.find("read-receipt") < both.find("delivery"))
+check("both marks share the receipt row",
+      both.count("receipt-row") >= 1)
+check("the read eye and delivery share a block row",
+      ".receipt-row { display: block;" in chat_themes._UNREAD_CSS
+      and ".receipt-row .read-receipt" in chat_themes._UNREAD_CSS
+      and ".receipt-row .delivery" in chat_themes._UNREAD_CSS)
 read_src = inspect.getsource(ChatView.mark_message_read)
 check("the read eye also matches the server stanza id",
       "data-stanza-sid" in read_src)
@@ -121,7 +129,21 @@ src = open(os.path.join(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))), "stanza_im", "ui", "chat_widget.py"),
     encoding="utf-8").read()
 check("the read title is part of the re-render kwargs",
-      '"read_title": self._read_receipt_title(entry)' in src)
+      '"read_title": self._read_title_for_entry(entry)' in src)
+check("delivery is part of the re-render kwargs",
+      '"delivered": self._delivered_for_entry(entry)' in src)
+
+# Session marks are keyed by refs, not by the transient entry object.
+w = widget()
+w._messages.append({"sender": "Me", "body": "hi", "direction": "outgoing",
+                    "message_id": "m9", "origin_id": "m9"})
+w.mark_delivered("m9")
+w.mark_message_read("m9", "Bob")
+replacement = dict(w._messages[0])
+check("delivery survives an entry replacement",
+      w._delivered_for_entry(replacement))
+check("read state survives an entry replacement",
+      w._read_title_for_entry(replacement) == "Seen")
 
 # 6. MainWindow routes 1:1 and MUC displayed markers separately --------------
 class ChatWindow:

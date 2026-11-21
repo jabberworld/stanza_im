@@ -2299,6 +2299,14 @@ class MainWindow(QtWidgets.QMainWindow):
             return self._client.jid_str.split("@", 1)[0]
         return ""
 
+    def _muc_self_nick(self, room: str) -> str:
+        """Our current occupant nick in *room* (join state / client fallback)."""
+        nick = str(self._muc_self_nicks.get(room, "") or "")
+        if nick or self._client is None:
+            return nick
+        gi = self._client.groupchats.get(room)
+        return str(getattr(gi, "nick", "") or "")
+
     def _on_bookmark_new(self) -> None:
         from stanza_im.ui.bookmark_dialog import BookmarkDialog
         dlg = BookmarkDialog(self._conference_servers(),
@@ -2401,6 +2409,23 @@ class MainWindow(QtWidgets.QMainWindow):
             self._client.set_muc_subject(room, default, langs=langs)
         show_modeless(dialog, finished)
 
+    def _room_avatar_path(self, room: str) -> str:
+        """Resolve a room avatar cache-first, including a pre-existing file.
+
+        Room vCards are fetched asynchronously and minimized rooms used to
+        never request one, so a cached PNG on disk must be enough to paint the
+        conference row immediately at login/join.
+        """
+        from stanza_im.include import avatars
+        path = str(self._muc_avatar_paths.get(room) or "")
+        contact = self._client.get_contact(room) if self._client else None
+        path = path or str(getattr(contact, "avatar_path", "") or "")
+        if not path and avatars.has_avatar(room):
+            path = avatars.avatar_path(room)
+        if path:
+            self._muc_avatar_paths[room] = path
+        return path
+
     def _sync_conference_roster(self, room: str):
         """Represent an active MUC using the normal roster row renderer."""
         if not self._client or room not in self._muc_self_nicks:
@@ -2410,6 +2435,7 @@ class MainWindow(QtWidgets.QMainWindow):
         contact = self._client.get_contact(room)
         status = info.get("show", "online") or "online"
         status_message = info.get("status", "")
+        avatar = self._room_avatar_path(room)
         self._roster.remove_user(room)
         self._roster.add_user(UserItem(
             jid=room,
@@ -2419,13 +2445,17 @@ class MainWindow(QtWidgets.QMainWindow):
             status_message=status_message,
             icon_key=status if status in ("online", "chat", "away", "xa", "dnd", "offline")
             else "online",
-            avatar_path=(self._muc_avatar_paths.get(room)
-                         or getattr(contact, "avatar_path", None)),
+            avatar_path=avatar or getattr(contact, "avatar_path", None),
             unread_count=self._unread_counts.get(room, 0),
             unread_mentions=self._unread_mentions.get(room, 0),
         ))
         self._conference_roster.add(room)
         self._roster._groups[tr("roster_group_conferences")].single_count = True
+        if not avatar and room not in self._vcard_requested:
+            # Cache miss: fetch in the background (never force here, so a
+            # recent cached card is reused instead of hitting the server on
+            # every join).
+            self._request_vcard(room)
         self._chat_window.set_contact_status(room, status)
         self._remember_contact(room, name=self._muc_display_name(room),
                                groups=[tr("roster_group_conferences")],
@@ -2619,6 +2649,11 @@ class MainWindow(QtWidgets.QMainWindow):
             return False
         if bare in getattr(self, "_server_jids", set()):
             return False
+        if "@" not in bare:
+            # A bare service JID that was not explicitly added as a server or
+            # transport is not a contact: an old roster/cache residue must not
+            # hide it from «Не в списке».
+            return True
         if bare in getattr(self, "_pm_targets", {}):
             return False
         if bare in getattr(self, "_muc_self_nicks", {}):
@@ -5411,6 +5446,12 @@ class MainWindow(QtWidgets.QMainWindow):
         if jid in getattr(self, "_server_jids", set()):
             # An explicitly added server lives in the virtual «Сервер» group.
             self._sync_server_roster(jid)
+            return None
+        if "@" not in jid:
+            # A bare service JID in an old roster cache (or a server-added
+            # item) is not an ordinary contact until the user explicitly adds
+            # it.  Keep it visible in the session «Не в списке» group.
+            self._track_not_in_roster(jid, item.get("name") or "")
             return None
         if jid in getattr(self, "_not_in_roster", set()):
             self._not_in_roster.discard(jid)
@@ -9606,11 +9647,18 @@ class MainWindow(QtWidgets.QMainWindow):
             anchor_ts = max(local_ts, remote_ts)
             if not anchor_ts:
                 anchor_ts = str(start_ts or "")
-            count = (await history.count_incoming_after_async(key, anchor_ts)
-                     if anchor_ts else 0)
+            self_nick = self._muc_self_nicks.get(key, "")
+            count = (await history.count_incoming_after_async(
+                key, anchor_ts, exclude_sender=self_nick)
+                if anchor_ts else 0)
             if remote_ahead:
                 # The other device displayed further than us: its point is
                 # authoritative and the prefix may be cleared.
+                new_unread = count
+            elif self_nick:
+                # For a MUC the archive count is authoritative: our own relayed
+                # message is stored as incoming and used to freeze a stale
+                # one-message badge via max(count, current).
                 new_unread = count
             else:
                 # Our point is newer (or equal), so preserve an existing block
@@ -9625,7 +9673,6 @@ class MainWindow(QtWidgets.QMainWindow):
                 record["seen_sid"] = remote_sid
                 record["seen_ts"] = remote_ts
                 record["seen_ref"] = ""
-            self_nick = self._muc_self_nicks.get(key, "")
             if self_nick and anchor_ts:
                 rows = await history.load_history_async(
                     key, limit=500, since=anchor_ts)
@@ -9975,16 +10022,17 @@ class MainWindow(QtWidgets.QMainWindow):
             # the local read point instead of the MAM page size, so an old or
             # pruned id cannot resurrect messages the user already read.
             anchor_ts = ts or local_ts
+            self_nick = self._muc_self_nicks.get(key, "")
             if anchor_ts:
                 count = await history.count_incoming_after_async(
-                    key, anchor_ts)
+                    key, anchor_ts, exclude_sender=self_nick)
             else:
                 count = int(incoming or 0)
             anchor_sid = sid if ts else (
                 str((entry or {}).get("seen_sid")
                     or (entry or {}).get("read_sid") or sid))
             current = int((self._unread_chats.get(key) or {}).get("unread") or 0)
-            count = max(count, current)
+            count = count if self_nick else max(count, current)
             self._set_mds_anchor(key, anchor_sid, anchor_ts)
             if local_wins:
                 # Repair the shared node: it was behind this device's own
@@ -10025,7 +10073,6 @@ class MainWindow(QtWidgets.QMainWindow):
                 record["seen_ref"] = ""
                 record["seen_ts"] = anchor_ts
                 record["seen_sid"] = anchor_sid
-            self_nick = self._muc_self_nicks.get(key, "")
             mentions = 0
             if self_nick and anchor_ts:
                 rows = await history.load_history_async(
@@ -10126,9 +10173,10 @@ class MainWindow(QtWidgets.QMainWindow):
                        str((entry or {}).get("seen_ts") or ""))
         if local_ts and remote_ts <= local_ts:
             return
-        count = await history.count_incoming_after_async(key, remote_ts)
-        mentions = 0
         self_nick = self._muc_self_nicks.get(key, "")
+        count = await history.count_incoming_after_async(
+            key, remote_ts, exclude_sender=self_nick)
+        mentions = 0
         if self_nick:
             rows = await history.load_history_async(
                 key, limit=500, since=remote_ts)
@@ -10348,7 +10396,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # The test is repeated below for the counters, but it is needed here as
         # well: an unread message of a backgrounded room carries the separator,
         # and it is armed before the entry is rendered.
-        self_nick = self._muc_self_nicks.get(room, "")
+        self_nick = self._muc_self_nick(room)
         room_active = (self._chat_area_available()
                        and self._chat_window.current_jid() == room)
         if chat and not room_active and nick != self_nick:

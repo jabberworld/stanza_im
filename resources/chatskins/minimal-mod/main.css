@@ -250,7 +250,9 @@ a:hover{
 }
 .stanza-menu button:hover { background: #e0edff; }
 
-.time_initial .delivery { display: block; color: #777; margin-left: 0; }
+.time_initial .receipt-row { display: block; color: #777; }
+.time_initial .receipt-row .read-receipt,
+.time_initial .receipt-row .delivery { display: inline; margin-left: 4px; }
 .typing-indicator { color: #888; font-style: italic; padding: 3px 16px; min-height: 18px; }
 .context_message { color: #999; }
 

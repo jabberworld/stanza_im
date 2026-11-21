@@ -91,6 +91,19 @@ w = _widget([f"m-{i}" for i in range(70)])
 check("a fully visible unread block becomes zero",
       w.mark_visible_unread() == 0)
 
+# A MUC row can render the server stanza-id while origin_id is a client UUID.
+w = _widget()
+w._messages = []
+w._history = [{
+    "direction": "incoming", "sender": "alice", "body": "server id",
+    "timestamp": "2026-10-02T10:00:00Z",
+    "origin_id": "client-uuid", "stanza_id": "123456",
+    "archive_id": "123456", "message_id": "client-uuid",
+}]
+w._view = _VisibleView(["123456"])
+check("visible server stanza-id removes the matching unread row",
+      w.mark_visible_unread() == 0)
+
 # outgoing messages are not part of the unread block
 w = _widget()
 w._history.insert(10, {
@@ -320,6 +333,22 @@ MainWindow._apply_visible_unread(seen_win, "room@example", 16)
 check("a fully seen block publishes its displayed point without wiping the divider",
       seen_win._mds_pending_sid == "sid-1"
       and seen_win._mds_pending_jid == "room@example")
+
+# Own MUC echo is stored as incoming but must not be counted as unread.
+from stanza_im.core import history  # noqa: E402
+
+room_jid = "muc@conf.example"
+history.store_message(room_jid, "incoming", "mine", sender="rain",
+                      timestamp="2026-10-02T10:00:00Z",
+                      message_id="own-1", origin_id="own-1")
+history.store_message(room_jid, "incoming", "other", sender="alice",
+                      timestamp="2026-10-02T10:01:00Z",
+                      message_id="other-1", origin_id="other-1")
+check("history excludes our own MUC echo from unread",
+      history.count_incoming_after(room_jid, "2026-10-02T09:00:00Z",
+                                   exclude_sender="rain") == 1)
+check("history counts other MUC senders normally",
+      history.count_incoming_after(room_jid, "2026-10-02T09:00:00Z") == 2)
 
 if FAILURES:
     print("FAILURES:", FAILURES)

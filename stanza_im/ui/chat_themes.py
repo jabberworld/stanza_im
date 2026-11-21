@@ -140,7 +140,9 @@ _UNREAD_CSS = """
 .stanza-unread { margin: 8px 2px 6px; padding-top: 3px; text-align: center;
                  font-size: 0.85em; color: #888;
                  border-top: 1px solid rgba(127,127,127,.45); }
-.read-receipt { display: block; margin-left: 0; cursor: help; }
+.receipt-row { display: block; white-space: nowrap; }
+.receipt-row .read-receipt,
+.receipt-row .delivery { display: inline; margin-left: 4px; cursor: help; }
 """
 
 _emoji_font_family_cache: str | None = None
@@ -713,7 +715,8 @@ class ChatThemeFactory:
                        quick_response: dict | None = None,
                        quick_response_active: bool = False,
                        quick_response_ref: str = "",
-                       read_title: str = "") -> str:
+                       read_title: str = "",
+                       delivered: bool = False) -> str:
         """Render a single message to HTML using the skin template.
 
         With *mention* the incoming sender name is wrapped in a clickable
@@ -813,9 +816,15 @@ class ChatThemeFactory:
         sender_html += self._render_hats(hats)
 
         time_html = timestamp
-        if read_title and direction == "outgoing":
-            time_html += ('<span class="read-receipt" title="%s">'
-                          '\U0001F441</span>' % escape_html(read_title))
+        marks = []
+        if direction == "outgoing" and read_title:
+            marks.append('<span class="read-receipt" title="%s">'
+                         '\U0001F441</span>' % escape_html(read_title))
+        if direction == "outgoing" and delivered:
+            marks.append('<span class="delivery" title="%s">\u2713</span>'
+                         % escape_html(tr("msg_delivered")))
+        if marks:
+            time_html += '<span class="receipt-row">%s</span>' % "".join(marks)
         html = template.replace("%sender%", sender_html) \
                        .replace("%message%", body_html) \
                        .replace("%time%", time_html) \

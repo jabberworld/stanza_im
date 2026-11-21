@@ -1142,8 +1142,10 @@ the XMPP roster gets a session row in «Не в списке» (offline icon), i
 service JID without `@`; its context menu offers «Добавить в список», reusing
 `AddContactDialog` with the JID and localpart prefilled. An explicitly added
 server JID moves to the virtual «Сервер» group; a gateway answer moves it to
-Transports. The «Не в списке» row is removed once the JID enters the roster and
-is kept until logout otherwise.
+Transports. A bare service JID left in an old roster/cache is not shown as an
+ordinary contact and stays in «Не в списке» until explicitly added. The
+«Не в списке» row is removed once the JID enters the roster and is kept until
+logout otherwise.
 
 Those groups hold a row **computed by the app** rather than a real
 contact group, so they are excluded from the group pickers and from
@@ -1455,9 +1457,11 @@ Single conversation tab. Layout:
   with `refresh_avatar_for_sender(..., force=True)` because the avatar path and
   sender JID stay the same), never the roster or the whole list. A cached card
   whose XEP-0153 photo hash differs from the presence is re-validated once per
-  session (the cached avatar is shown until then). Right-click
-  opens the participant context menu; when the participant's real JID is
-  visible it also offers «Пригласить в» (XEP-0249, §7.3).
+  session (the cached avatar is shown until then). The room avatar itself is
+  cache-first by bare room JID (`include.avatars.avatar_path(room)`) and a room
+  vCard is requested once after a join even for minimized/auto-joined rooms.
+  Right-click opens the participant context menu; when the participant's real
+  JID is visible it also offers «Пригласить в» (XEP-0249, §7.3).
 
 ### 9.1 Slash Commands
 
@@ -2539,7 +2543,10 @@ Registers XEP plugins (conditionally where noted):
   `conference.`/`muc.`/`rooms.` domain), so an old unjoined room (`bimroom`) is
   never rebuilt as a 1:1 and does not become invisible unread; the join path
   reconciles it once the room is live. A normal join/open leaves a strictly
-  newer local point alone but republishes it.
+  newer local point alone but republishes it. History counts exclude our own
+  MUC echo (`count_incoming_after(..., exclude_sender=...)`), and visible
+  unread matching uses every stable id (`data-stanza-id`/`data-stanza-sid`/
+  `data-reply-id`), not only the preferred reply ref.
 - **Account-wide offline catch-up**: `core/sync_state.py` stores the account's
   forward MAM cursor (`sync_state.json`, per-profile, 0600). On login
   `JabberClient.sync_global_mam()` queries the account's **own archive**
@@ -3226,11 +3233,11 @@ except XEP-0096 `wontfix`). `tools/build_doap.py` regenerates it and
   read with a session-only eye (XEP-0184 delivery keeps the separate `✓`).
   `MainWindow._on_chat_marker_displayed` resolves a 1:1 bare JID, a MUC
   `room/nick` to the room (or an open private-message key), and `ChatWidget.
-  mark_message_read` stores the viewer list on the outgoing row. The eye is
-  rendered in `.time_initial`/`.timestamp` (outgoing only) as a block element
-  under the time, so it never shifts the timestamp; it is kept across a tab
-  re-render, and its MUC tooltip names at most ten viewers plus «и ещё N». No
-  SQLite schema is changed.
+  mark_message_read` stores the viewer list on the outgoing row. Delivery and
+  read state live in session maps keyed by every message id, so they survive a
+  tab resume/re-render or history reload. Both marks share a `.receipt-row` under
+  the time (eye first, delivery check second, both inline); the MUC tooltip
+  names at most ten viewers plus «и ещё N». No SQLite schema is changed.
 
 ### 14.5.3 Whiteboard (`ui/whiteboard_dialog.py`, `ui/whiteboard_canvas.py`)
 

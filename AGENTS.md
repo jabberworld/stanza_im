@@ -259,8 +259,10 @@ stops and clears when the tab is shown. The **Transports** tab (icon
 `transports.png`) lists only transports the user explicitly added and that a
 background probe identified as gateways. An unknown JID without `@` first gets
 a session row in «Не в списке», exactly like an unknown user contact — an
-incoming message or a plain roster refresh never moves it to Transports. The
-context action «Добавить в список» adds the server JID to the roster, shows it
+incoming message or a plain roster refresh never moves it to Transports. A
+bare no-`@` JID already present in a stale roster/cache is likewise kept in
+«Не в списке» until the user explicitly adds it. The context action «Добавить
+в список» adds the server JID to the roster, shows it
 immediately in the virtual **«Сервер»** group (`roster_group_server`,
 `_sync_server_roster`) and starts one `client.discover_service_info(bare)`
 probe; `category == "gateway"` moves it to `_transport_jids`, removes it from
@@ -1336,7 +1338,12 @@ its path and the sender JID does not change) — the roster and the other rows
 are not touched (no `clear_pixmaps`, no full-list avatar reload). A cached
 participant card is re-validated **once per session** when the presence's
 XEP-0153 photo hash differs from the cached card's `photo_hash` (a nick can be
-reused by another person), showing the cached avatar meanwhile.
+reused by another person), showing the cached avatar meanwhile. A conference
+room avatar is resolved **cache-first by the bare room JID** as well:
+`_sync_conference_roster` checks `_muc_avatar_paths`, the room contact and the
+on-disk `include.avatars.avatar_path(room)` before painting, and requests the
+room vCard (non-forced, once per session) after a join even for minimized or
+auto-joined rooms; a cached PNG is enough at startup.
 The conference toggles are
 `appearance.muc_show_avatars`/`muc_show_clients`/`muc_show_hats` (Preferences →
 Appearance → «Конференции», all `true`; a participant's caps node is captured in
@@ -2430,12 +2437,16 @@ so a stale 2-message block grows to the real 23. A server-assist XEP-0333
 `_on_bodyless_chat_marker_stanza`; the same stanza separately emits
 `chat_marker_displayed` for the session-only read eye on our outgoing message.
 The delivery check (`receipt_delivered`, XEP-0184) and the read eye
-(`chat_marker_displayed`, XEP-0333) are independent; the eye is not persisted.
-For a MUC the marker sender is `room/nick`, so the viewer is the nick and the
-eye lives on the room's outgoing row; a private-message key is preferred when
-it is open. Its tooltip lists up to ten viewers plus «и ещё N». The eye is a
-block element under the timestamp (`.read-receipt { display: block; }`), so it
-never shifts the timestamp text and works with both minimal-mod and Candy.
+(`chat_marker_displayed`, XEP-0333) are independent; neither is persisted to
+SQLite. `ChatWidget` keeps them in session maps keyed by every message id
+(`_delivered_refs`, `_read_refs`, `_read_by_refs`), so a resume/re-render or a
+history reload can reapply them; prepared fragments are not used while session
+marks exist. For a MUC the marker sender is `room/nick`, so the viewer is the
+nick and the eye lives on the room's outgoing row; a private-message key is
+preferred when it is open. Its tooltip lists up to ten viewers plus «и ещё N».
+Both marks share a block `.receipt-row` under the timestamp — eye first, then
+the delivery check (`.receipt-row .read-receipt`/`.delivery` are inline), so
+the eye never adds a third line.
 [`tests/test_read_receipts.py`]
 `_mds_apply_remote` skips a state equal to `_mds_local` for live PEP events, but
 the startup catch-up passes `force=True`: the map is seeded at connect from the
@@ -2523,6 +2534,14 @@ are never marked seen. The point is monotonic and `set_seen` no longer moves
 the unread separator boundary — `mark_visible_unread` advances it from the
 visible block. Delayed messages whose timestamp is not newer than the read/seen
 point stay in chronological history and do not increase unread (variant A).
+The visible/unread match uses **every** stable id of a row (origin/archive/
+stanza/message) and the DOM reports `data-stanza-id`, `data-reply-id` and
+`data-stanza-sid`, so a MUC row whose origin id is a client UUID but whose
+server stanza id is numeric still decrements. The MDS/history counts exclude
+our own MUC nickname (`count_incoming_after(..., exclude_sender=...)`): the
+server echoes our groupchat message back as incoming. An anchor ref missing
+from the first window is paged from the local archive **before** the timestamp
+fallback, so opening a chat cannot land on an older message.
 `ChatWindow.last_seen` relays the report; the `▼ N` number and the roster badge
 use the same block count on open, bump, seen and reset. `_seed_unseen` seeds the
 floating count even while an old anchor is still resolving, and a one-shot

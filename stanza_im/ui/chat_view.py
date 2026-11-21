@@ -2170,8 +2170,10 @@ window.__stanzaMentionRef = '';
                 "var m=document.querySelectorAll('#chat .stanza-message');"
                 "var vh=window.innerHeight||0;var out=[];"
                 "for(var i=0;i<m.length;i++){var r=m[i].getBoundingClientRect();"
-                "if(r.bottom>0&&r.top<vh){var id=m[i].getAttribute('data-stanza-id')"
-                "||m[i].getAttribute('data-reply-id')||'';if(id)out.push(id);}}"
+                "if(r.bottom>0&&r.top<vh){var ids=[m[i].getAttribute('data-stanza-id'),"
+                "m[i].getAttribute('data-reply-id'),"
+                "m[i].getAttribute('data-stanza-sid')];"
+                "for(var j=0;j<ids.length;j++){if(ids[j])out.push(ids[j]);}}}"
                 "var result=JSON.stringify(out);"
                 "window.__stanzaVisibleCache=result;return result;})(),"
                 " window.__stanzaImageLoadRef || '',"
@@ -2822,7 +2824,8 @@ window.__stanzaMentionRef = '';
                                 quick_response: dict | None = None,
                                 quick_response_active: bool = False,
                                 quick_response_ref: str = "",
-                                read_title: str = "") -> str:
+                                read_title: str = "",
+                                delivered: bool = False) -> str:
             """Render (and mark) a single message's full HTML node."""
             phrase = self._action_phrase(body)
             if phrase is not None:
@@ -2842,7 +2845,7 @@ window.__stanzaMentionRef = '';
                     quick_response=quick_response,
                     quick_response_active=quick_response_active,
                     quick_response_ref=quick_response_ref,
-                    read_title=read_title)
+                    read_title=read_title, delivered=delivered)
             if reply_quote is not None:
                 ref_sender, ref_snippet, ref_target = reply_quote
                 html = self._theme.render_reply(
@@ -2876,7 +2879,8 @@ window.__stanzaMentionRef = '';
                         quick_response: dict | None = None,
                         quick_response_active: bool = False,
                         quick_response_ref: str = "",
-                        read_title: str = ""):
+                        read_title: str = "",
+                        delivered: bool = False):
             """Add a message to the chat view.
 
             *reply_quote* is an optional ``(ref_sender, ref_snippet)`` shown
@@ -2891,7 +2895,7 @@ window.__stanzaMentionRef = '';
                 retract_reason, retract_by, moderatable, reactions,
                 unread_marker, media, encrypted, markup, stanza_id,
                 quick_response, quick_response_active, quick_response_ref,
-                read_title)
+                read_title, delivered)
             if not self._ready:
                 logger.debug("chat add_message buffered (page not ready, "
                              "pending=%d)", len(self._pending))
@@ -3095,6 +3099,8 @@ window.__stanzaMentionRef = '';
                         retract_by=entry.get("retract_by", ""),
                         reactions=entry.get("reactions"),
                         markup=entry.get("markup"),
+                        read_title=entry.get("read_title", ""),
+                        delivered=entry.get("delivered", False),
                     )
                 reply_quote = entry.get("reply_quote")
                 if reply_quote is not None:
@@ -3193,9 +3199,22 @@ window.__stanzaMentionRef = '';
             self.page().runJavaScript(f"""
             var node = document.querySelector('[data-stanza-id=' + JSON.stringify({safe}) + ']');
             var stamp = node && node.querySelector('.time_initial');
-            if (stamp && !stamp.querySelector('.delivery')) {{
-                var mark = document.createElement('span');
-                mark.className = 'delivery'; mark.textContent = '✓'; stamp.appendChild(mark);
+            if (stamp) {{
+                var row = stamp.querySelector('.receipt-row');
+                if (!row) {{
+                    row = document.createElement('span');
+                    row.className = 'receipt-row';
+                    stamp.appendChild(row);
+                }}
+                var eye = row.querySelector('.read-receipt')
+                    || stamp.querySelector('.read-receipt');
+                if (eye && eye.parentNode !== row) row.appendChild(eye);
+                if (!row.querySelector('.delivery')) {{
+                    var mark = document.createElement('span');
+                    mark.className = 'delivery'; mark.textContent = '✓';
+                    if (eye) eye.insertAdjacentElement('afterend', mark);
+                    else row.appendChild(mark);
+                }}
             }}
             """)
 
@@ -3212,12 +3231,19 @@ window.__stanzaMentionRef = '';
                 if (!node) {{ node = document.querySelector('[data-reply-id=' + JSON.stringify({safe}) + ']'); }}
                 var stamp = node && node.querySelector('.time_initial');
                 if (stamp) {{
-                    var mark = stamp.querySelector('.read-receipt');
+                    var row = stamp.querySelector('.receipt-row');
+                    if (!row) {{
+                        row = document.createElement('span');
+                        row.className = 'receipt-row';
+                        stamp.appendChild(row);
+                    }}
+                    var mark = row.querySelector('.read-receipt')
+                        || stamp.querySelector('.read-receipt');
                     if (!mark) {{
                         mark = document.createElement('span');
                         mark.className = 'read-receipt';
                         mark.textContent = '\U0001F441';
-                        stamp.appendChild(mark);
+                        row.insertBefore(mark, row.querySelector('.delivery'));
                     }}
                     mark.title = {safe_title};
                 }}
@@ -3935,16 +3961,23 @@ else:
                         quick_response: dict | None = None,
                         quick_response_active: bool = False,
                         quick_response_ref: str = "",
-                        read_title: str = ""):
+                        read_title: str = "",
+                        delivered: bool = False):
             # *markup* (XEP-0394) is accepted for API parity with the WebEngine
             # view but the plain fallback does not render it.
             marker_html = (ChatThemeFactory.render_unread_marker()
                            if unread_marker else "")
             read_suffix = ""
-            if read_title and outgoing:
-                read_suffix = (' <span class="read-receipt" title="%s">'
-                               '\U0001F441</span>'
-                               % html.escape(read_title))
+            marks = []
+            if outgoing and read_title:
+                marks.append('<span class="read-receipt" title="%s">'
+                             '\U0001F441</span>' % html.escape(read_title))
+            if outgoing and delivered:
+                marks.append('<span class="delivery" title="%s">\u2713</span>'
+                             % html.escape(tr("msg_delivered")))
+            if marks:
+                read_suffix = ('<br><span class="receipt-row">%s</span>'
+                               % "".join(marks))
             if retracted:
                 text = tr('msg_retracted')
                 if retract_reason or retract_by:

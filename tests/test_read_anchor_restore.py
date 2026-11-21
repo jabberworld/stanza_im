@@ -291,6 +291,10 @@ check("a timestamp-only read point places the separator anyway",
       and [m["body"] for m in w._view.messages if m["unread_marker"]] == ["four"])
 check("the unread divider (not the message) is flashed",
       w._view.flashed == 1 and w._view.highlighted == [])
+_restore_src = method_source(_cw_src, "_restore_from_anchor")
+check("a missing anchor ref is paged before its timestamp fallback",
+      _restore_src.index("_jump_to_message(ref") <
+      _restore_src.index("_entry_before_or_at("))
 check("the anchor scroll itself never flashes a message",
       "highlight=False" in method_source(_cw_src, "_restore_from_anchor"))
 check("an anchor found after paging does not flash a message",
