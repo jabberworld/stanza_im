@@ -64,6 +64,7 @@ class ChatWindow(QtWidgets.QMainWindow):
         self._remote_activity: dict[str, str] = {}
         self._tab_status: dict[str, str] = {}   # jid -> latest show
         self._tab_unread: dict[str, tuple[int, int]] = {}  # jid -> (unread, mentions)
+        self._last_title: str | None = None
         self._show_unread_in_tabs = True
         self._own_jid = ""
         self._own_avatar = ""
@@ -159,6 +160,7 @@ class ChatWindow(QtWidgets.QMainWindow):
         if embedded == self._embedded:
             return
         self._embedded = embedded
+        self._last_title = None
         if embedded:
             self.setWindowFlags(QtCore.Qt.WindowType.Widget)
             self.setMinimumSize(200, 120)
@@ -753,21 +755,25 @@ class ChatWindow(QtWidgets.QMainWindow):
             icon = QtGui.QIcon()
         self._tab_widget.setTabIcon(index, icon)
 
-    def set_unread(self, jid: str, unread: int, mentions: int = 0) -> None:
+    def set_unread(self, jid: str, unread: int, mentions: int = 0) -> bool:
         """Show the conversation's unread count on its tab (Psi style).
 
         The tab text becomes ``[N] name`` and turns red for a 1:1/private chat
         with unread messages (a conference only when a message mentions us).
         The window title sums the open tabs' counters, so a conversation with
-        no open tab is ignored.
+        no open tab is ignored.  Returns ``True`` only when the counters changed.
         """
         if jid not in self._tabs:
-            return
+            return False
         unread = max(0, int(unread or 0))
         mentions = max(0, int(mentions or 0))
-        self._tab_unread[jid] = (unread, mentions)
+        value = (unread, mentions)
+        if self._tab_unread.get(jid) == value:
+            return False
+        self._tab_unread[jid] = value
         self._apply_tab_unread(jid)
         self._update_title()
+        return True
 
     def set_show_unread_in_tabs(self, show: bool) -> None:
         """Toggle the unread indicator on the tabs and the window title."""
@@ -847,6 +853,9 @@ class ChatWindow(QtWidgets.QMainWindow):
             text = f"[{total}] {name}"
         else:
             text = name
+        if text == self._last_title:
+            return
+        self._last_title = text
         if self._embedded:
             self.window_title_changed.emit(text)
         else:

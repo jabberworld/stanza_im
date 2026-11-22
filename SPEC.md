@@ -1325,7 +1325,9 @@ show/raise/activate calls and emits `attention_requested` instead, so
   (the confirmed `_close_tab` leave path). Dragging a tab only updates
   `_tab_order`; a `currentChanged` that keeps the same conversation does not
   re-run focus/tail/unread work. Focusing a read chat only mirrors its
-  counters — the tail query, JS viewport poll and visible-unread reconciliation
+  counters — unchanged unread/mention/reaction values and the window title are
+  not re-pushed, so a fast switch does not touch the tab text or in-page
+  buttons. The tail query, JS viewport poll and visible-unread reconciliation
   run for unread/history-sync chats; a hidden tab's stored tail waits for its
   next focus, and the first scroll poll after `showEvent` is deferred.
 

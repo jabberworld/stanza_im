@@ -3493,12 +3493,12 @@ class ChatWidget(QtWidgets.QWidget):
 
     # ── Reactions on our own messages ─────────────────────────────
 
-    def set_reaction_pending(self, mapping: dict) -> None:
+    def set_reaction_pending(self, mapping: dict) -> bool:
         """Replace the pending-reaction map (``{ref: count}``) and refresh.
 
         The map is owned by ``MainWindow`` (session state); its insertion
         order is the order the messages first got a reaction, which the button
-        walks on each click.
+        walks on each click.  Returns ``True`` only when the map changed.
         """
         counts: dict[str, int] = {}
         for ref, count in (mapping or {}).items():
@@ -3508,9 +3508,14 @@ class ChatWidget(QtWidgets.QWidget):
                 value = 0
             if ref and value > 0:
                 counts[str(ref)] = value
+        refs = list(counts)
+        if (counts == self.__dict__.get("_reaction_counts")
+                and refs == self.__dict__.get("_reaction_refs")):
+            return False
         self._reaction_counts = counts
-        self._reaction_refs = list(counts)
+        self._reaction_refs = refs
         self._update_reaction_button()
+        return True
 
     def reaction_count(self) -> int:
         return sum(self._reaction_counts.values())
@@ -5417,37 +5422,46 @@ class ChatWidget(QtWidgets.QWidget):
         except Exception:
             pass
 
-    def set_unread_count(self, count: int) -> None:
+    def set_unread_count(self, count: int) -> bool:
         """Show/refresh the jump button with the conversation's unread count.
 
         The number is pushed by ``MainWindow`` so it mirrors the roster badge
         and ticks down as messages are seen; the first-unseen click target is
         kept in sync separately by :meth:`_sync_jump_target_from_block`.
+        Returns ``True`` only when the count changed.
         """
         try:
-            self._unread_count = max(0, int(count or 0))
+            value = max(0, int(count or 0))
         except (TypeError, ValueError):
-            self._unread_count = 0
+            value = 0
+        if value == self.__dict__.get("_unread_count"):
+            return False
+        self._unread_count = value
         try:
-            self._view.set_unseen_count(self._unread_count)
+            self._view.set_unseen_count(value)
         except (AttributeError, RuntimeError):
             pass
+        return True
 
-    def set_mention_count(self, count: int) -> None:
+    def set_mention_count(self, count: int) -> bool:
         """Show/refresh the floating ``@`` button with the roster mention count.
 
         Like the jump count, the number is owned by ``MainWindow`` and ticks
         down as mentions are seen; the local ``_mention_refs`` only drives the
-        first-click target.
+        first-click target.  Returns ``True`` only when the count changed.
         """
         try:
-            self._mention_count = max(0, int(count or 0))
+            value = max(0, int(count or 0))
         except (TypeError, ValueError):
-            self._mention_count = 0
+            value = 0
+        if value == self.__dict__.get("_mention_count"):
+            return False
+        self._mention_count = value
         try:
-            self._view.set_mention_count(self._mention_count)
+            self._view.set_mention_count(value)
         except (AttributeError, RuntimeError):
             pass
+        return True
 
     def _sync_jump_target_from_block(self) -> None:
         """Point the jump button's first click at the first still-unseen message."""

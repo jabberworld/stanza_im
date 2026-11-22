@@ -651,7 +651,7 @@ check("the unread counter is pushed whenever it changes",
       and "self._push_unread_to_chat(jid)" in
       method_source(_mw_src, "_load_history"))
 check("the widget forwards the count and refreshes the click target",
-      "self._view.set_unseen_count(self._unread_count)" in
+      "self._view.set_unseen_count(value)" in
       method_source(_cw_src, "set_unread_count")
       and "self._view.set_unseen_target(first)" in
       method_source(_cw_src, "_sync_jump_target_from_block")
@@ -705,9 +705,9 @@ check("the widget wires the mention signal and count",
       in _create_view
       and "view.set_mention_count(self._mention_count)" in _create_view)
 check("the widget takes the @ number from the pushed count",
-      "self._mention_count = max(0, int(count or 0))"
+      "value = max(0, int(count or 0))"
       in method_source(_cw_src, "set_mention_count")
-      and "self._view.set_mention_count(self._mention_count)"
+      and "self._view.set_mention_count(value)"
       in method_source(_cw_src, "set_mention_count"))
 check("the @ target list drops the mentions already shown",
       "self._drop_seen_mentions()" in method_source(_cw_src, "_on_last_seen")

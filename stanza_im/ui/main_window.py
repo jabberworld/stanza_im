@@ -8730,18 +8730,23 @@ class MainWindow(QtWidgets.QMainWindow):
         entry = self._unread_chats.get(jid)
         count = int(entry["unread"]) if entry else 0
         mentions = int(entry["mentions"]) if entry else 0
-        logger.debug("UNREAD[push] jid=%s count=%d mentions=%d",
-                     jid, count, mentions)
+        changed = False
         if chat_window is not None:
             # Psi-style tab/title indicator (red for 1:1, mentions for MUC).
-            chat_window.set_unread(jid, count, mentions)
+            changed = chat_window.set_unread(jid, count, mentions)
         if chat is None:
+            if changed:
+                logger.debug("UNREAD[push] jid=%s count=%d mentions=%d",
+                             jid, count, mentions)
             return
         try:
-            chat.set_unread_count(count)
-            chat.set_mention_count(mentions)
+            changed = chat.set_unread_count(count) or changed
+            changed = chat.set_mention_count(mentions) or changed
         except (AttributeError, RuntimeError):
             pass
+        if changed:
+            logger.debug("UNREAD[push] jid=%s count=%d mentions=%d",
+                         jid, count, mentions)
 
     def _bump_unread(self, jid: str, mention: bool = False,
                      important: bool = False, ts: str = "",
