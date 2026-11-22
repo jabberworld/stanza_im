@@ -1677,9 +1677,10 @@ mouse-transparent, a press that lands on its rectangle is routed to `_close()`
 in `_OsdWindow.mousePressEvent` (never to the notification's `_click()`), so
 the corner always dismisses. A transient OSD is dismissed in `OsdManager._clicked`'s
 `finally`, so a failing chat/anchor open cannot leave the same bubble clickable;
-`MainWindow._osd_click` only raises an already current chat or one whose anchor
-is still pending instead of re-opening it, and `_on_chat_marker_displayed`
-routes a XEP-0333 marker to the outgoing row's session-only read eye.
+`MainWindow._osd_click` only raises an already current chat; an open but
+inactive chat is activated even while its read anchor is pending, and only an
+unloaded/absent tab is opened. `_on_chat_marker_displayed` routes a XEP-0333
+marker to the outgoing row's session-only read eye.
 `OsdManager` also offers a **sticky** OSD
 (`show_sticky(key, …)` / `update_sticky` / `dismiss_sticky`): no auto-hide,
 excluded from the `osd_max` eviction, updated in place via

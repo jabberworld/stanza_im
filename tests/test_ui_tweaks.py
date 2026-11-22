@@ -296,6 +296,7 @@ app.setStyleSheet("")
 class _OscChat:
     def __init__(self, pending=False):
         self._pending = pending
+        self._initial_load_done = True
 
     def anchor_restore_pending(self):
         return self._pending
@@ -305,12 +306,18 @@ class _OscChatWindow:
     def __init__(self, current):
         self._current = current
         self._chat = _OscChat(pending=True)
+        self.activated = []
 
     def current_jid(self):
         return self._current
 
     def get_chat(self, jid):
         return self._chat
+
+    def activate(self, jid):
+        self._current = jid
+        self.activated.append(jid)
+        return True
 
 
 _mw = MainWindow.__new__(MainWindow)
@@ -326,8 +333,10 @@ check("an OSD click on the current chat only raises it",
 _mw._chat_window = _OscChatWindow("other@example.com")
 _raises.clear()
 MainWindow._osd_click(_mw, "bob@example.com")
-check("an OSD click while the anchor is pending does not reopen",
-      len(_opens) == 0 and _raises == [True])
+check("an OSD click activates an open chat even with a pending anchor",
+      _mw._chat_window.current_jid() == "bob@example.com"
+      and _mw._chat_window.activated == ["bob@example.com"]
+      and len(_opens) == 0)
 
 print()
 if FAILURES:

@@ -2270,8 +2270,9 @@ _on_groupchat_presence` parses it with `hats.parse_hats` into
   (`_hovered`/`_pause_all`/`_resume_all`) and resumes it once the cursor leaves
   all of them. A click runs the notification's `on_click` and dismisses a
   transient bubble in a `finally` block, so a failing open can never leave the
-  same OSD clickable; `MainWindow._osd_click` raises an already current chat or
-  one whose read anchor is still pending instead of re-opening it. A **sticky**
+  same OSD clickable; `MainWindow._osd_click` only raises an already current
+  chat — an open but inactive chat is activated even while its read anchor is
+  pending, and only an unloaded/absent tab is opened. A **sticky**
   OSD (`show_sticky(key, …)` / `update_sticky` / `dismiss_sticky`) never
   auto-hides, is updated in place via `_OsdWindow.set_text`, and calls its
   owner's `on_close` when dismissed; it backs the Digest plugin.

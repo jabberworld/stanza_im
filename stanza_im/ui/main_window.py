@@ -13135,10 +13135,16 @@ class MainWindow(QtWidgets.QMainWindow):
             QtCore.QTimer.singleShot(
                 0, lambda key=jid: self._refresh_visible_state(key))
             return
-        if chat is not None and chat.anchor_restore_pending():
+        if chat is not None and getattr(chat, "_initial_load_done", False):
+            # The tab is already open and loaded; activate it without
+            # reopening (an anchor restore may still be in flight).
             self._raise_chat_area()
-            logger.debug("OSD[click] jid=%s anchor-pending", jid)
-            return
+            activate = getattr(self._chat_window, "activate", None)
+            if callable(activate) and activate(jid):
+                logger.debug("OSD[click] jid=%s activated", jid)
+                QtCore.QTimer.singleShot(
+                    0, lambda key=jid: self._refresh_visible_state(key))
+                return
         logger.debug("OSD[click] jid=%s", jid)
         self._raise_chat_area()
         self._on_contact_open(jid)
