@@ -1449,9 +1449,10 @@ the chat document cannot be reset by the click. Pressing `Up` in the input
 while it is empty starts a reply to the newest incoming message
 (`ChatWidget._reply_to_last` walks `_newest_first()`, skips our own entries and
 those without a replyable id, then runs the same `_on_reply_requested` flow as
-the reply button; Ctrl+Up stays the XEP-0308 edit shortcut). Pressing `Down`
-while the reply is still untouched (the input holds exactly the inserted quote)
-cancels it again.
+the reply button; Ctrl+Up stays the XEP-0308 edit shortcut). While the quote is
+untouched, further `Up` presses walk to older reply targets and `Down` walks
+back to newer ones; `Down` on the newest target cancels the reply. Once the
+user types an answer the arrows return to normal cursor movement.
 [`tests/test_reply_up.py`]
 
 **Control links — mandatory rule**: *every* `stanza:` control link the chat
@@ -3880,11 +3881,11 @@ the preview cache TTL/limit, the MUC mention highlight mode and the
 `appearance.show_unread_in_tabs` toggle — the Psi-style unread indicator on the
 chat tabs and the window title, default on). `Apply` applies
 settings without closing the dialog. Chat shortcuts include Enter/Ctrl+Enter, Esc,
-Up (empty input) to reply to the last incoming message, Down to cancel an
-untouched reply, Ctrl+Up to edit the last own message, Ctrl+Down to cancel that
-edit, Ctrl+PgUp/Ctrl+PgDown, Ctrl+1..9 and Ctrl+W; Esc also closes the media
-viewer. Contact context menus
-provide
+Up (empty input) to reply to the last incoming message, further Up/Down to
+cycle reply targets while the quote is untouched, Down on the newest target to
+cancel, Ctrl+Up to edit the last own message, Ctrl+Down to cancel that edit,
+Ctrl+PgUp/Ctrl+PgDown, Ctrl+1..9 and Ctrl+W; Esc also closes the media viewer.
+Contact context menus provide
 checkable group assignment and creation of new groups. Appearance → «Разное»
 also selects the interface mode (`appearance.interface_mode`): `separate`
 (default) keeps the chat in its own window, `unified` embeds the whole

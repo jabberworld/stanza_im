@@ -1751,7 +1751,10 @@ poll delivers that `stanza:reply:` reference to Python as a `link_clicked`
 is never reset by the click. Pressing `Up` in an empty input starts a reply to
 the newest incoming message (`ChatWidget._reply_to_last` skips our own entries
 and those without a replyable id; Ctrl+Up remains the XEP-0308 edit shortcut).
-Pressing `Down` while the reply is untouched (the input holds exactly the
+While the quote is untouched, further `Up` presses cycle to older reply targets
+and `Down` cycles back to newer ones; `Down` on the newest target cancels the
+reply. Typing an answer restores normal cursor movement. Pressing `Down` while
+the reply is untouched (the input holds exactly the
 inserted quote) cancels it.
 **Control-link rule (mandatory):** every `stanza:` control link the chat
 renders — message-menu buttons *and* links placed elsewhere, e.g. the

@@ -1488,6 +1488,13 @@ class ChatWidget(QtWidgets.QWidget):
                     and not has_ctrl
                     and not modifiers & QtCore.Qt.KeyboardModifier.AltModifier
                     and not modifiers & QtCore.Qt.KeyboardModifier.ShiftModifier
+                    and self._reply_untouched()):
+                self._cycle_reply(1)
+                return True
+            if (event.key() == QtCore.Qt.Key.Key_Up
+                    and not has_ctrl
+                    and not modifiers & QtCore.Qt.KeyboardModifier.AltModifier
+                    and not modifiers & QtCore.Qt.KeyboardModifier.ShiftModifier
                     and not self._input.toPlainText()
                     and self._reply_to_last()):
                 return True
@@ -1502,7 +1509,12 @@ class ChatWidget(QtWidgets.QWidget):
                     and not modifiers & QtCore.Qt.KeyboardModifier.AltModifier
                     and not modifiers & QtCore.Qt.KeyboardModifier.ShiftModifier
                     and self._reply_untouched()):
-                self._cancel_reply()
+                candidates = self._reply_candidates()
+                index = self._reply_index(candidates)
+                if index <= 0:
+                    self._cancel_reply()
+                else:
+                    self._reply_to_entry(candidates[index - 1])
                 return True
             if (event.key() == QtCore.Qt.Key.Key_V and has_ctrl
                     and self._handle_pasted_image()):
@@ -1882,19 +1894,53 @@ class ChatWidget(QtWidgets.QWidget):
             return reply_to.rsplit("/", 1)[1]
         return reply_to
 
-    def _reply_to_last(self) -> bool:
-        """Start a reply to the newest incoming message (Up on empty input)."""
+    def _reply_candidates(self) -> list[dict]:
+        """Replyable incoming messages, newest first, without duplicates."""
+        out: list[dict] = []
+        seen: set[str] = set()
         for entry in self._newest_first():
-            if self._is_mine(entry):
+            if self._is_mine(entry) or entry.get("retracted") \
+                    or entry.get("retract_marker"):
                 continue
             reply_id = self._reply_target_id(entry)
-            if not reply_id:
+            if not reply_id or reply_id in seen:
                 continue
-            self._on_reply_requested(
-                reply_id, entry.get("reply_author", ""),
-                entry.get("sender", ""), entry.get("body", ""))
+            seen.add(reply_id)
+            out.append(entry)
+        return out
+
+    def _reply_index(self, candidates: list[dict]) -> int:
+        for index, entry in enumerate(candidates):
+            if self._reply_target_id(entry) == self._reply_id:
+                return index
+        return -1
+
+    def _reply_to_entry(self, entry: dict) -> None:
+        if self._reply_id:
+            self._cancel_reply()
+        self._on_reply_requested(
+            self._reply_target_id(entry), entry.get("reply_author", ""),
+            entry.get("sender", ""), entry.get("body", ""))
+
+    def _cycle_reply(self, step: int) -> bool:
+        """Move to the next/previous reply target (newest = index 0)."""
+        candidates = self._reply_candidates()
+        index = self._reply_index(candidates)
+        if index < 0:
+            return False
+        target = index + step
+        if target < 0 or target >= len(candidates):
             return True
-        return False
+        self._reply_to_entry(candidates[target])
+        return True
+
+    def _reply_to_last(self) -> bool:
+        """Start a reply to the newest incoming message (Up on empty input)."""
+        candidates = self._reply_candidates()
+        if not candidates:
+            return False
+        self._reply_to_entry(candidates[0])
+        return True
 
     def _on_reply_requested(self, reply_id: str, author: str, sender: str,
                             snippet: str):

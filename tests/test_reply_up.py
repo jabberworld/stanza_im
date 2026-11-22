@@ -69,8 +69,9 @@ check("reply banner visible", not cw._reply_ctx.isHidden())
 check("quote inserted", "> Bob wrote:" in cw._input.toPlainText()
       and "hello there" in cw._input.toPlainText())
 
-# 2. a second Up (quote already in the input) is left to the editor -----------
-check("up ignored while composing a reply", press_up(cw) is False)
+# 2. a second Up (quote already in the input) stays on the only target -------
+check("up with one target stays on it",
+      press_up(cw) is True and cw._reply_id == "orig-bob")
 
 # 3. Up with a non-empty input does not start a reply -------------------------
 cw2 = new_widget()
@@ -121,6 +122,38 @@ cw6._input.setPlainText("changed text")
 check("ctrl+down consumed while editing", press_down(cw6, ctrl=True) is True)
 check("ctrl+down cancels the edit",
       cw6._editing_id == "" and cw6._input.toPlainText() == "")
+
+# 7b. Up/Down cycle through reply targets while the quote is untouched --------
+cw9 = new_widget()
+cw9.add_message(sender="Bob", body="old", timestamp="10:00",
+                direction="incoming", reply_able_id="m-9a",
+                reply_author="bob@example.com/res")
+cw9.add_message(sender="Bob", body="middle", timestamp="10:01",
+                direction="incoming", reply_able_id="m-9b",
+                reply_author="bob@example.com/res")
+cw9.add_message(sender="Bob", body="new", timestamp="10:02",
+                direction="incoming", reply_able_id="m-9c",
+                reply_author="bob@example.com/res")
+check("reply starts at the newest message",
+      press_up(cw9) is True and cw9._reply_id == "m-9c")
+check("up moves to the older reply target",
+      press_up(cw9) is True and cw9._reply_id == "m-9b")
+check("up moves again through history",
+      press_up(cw9) is True and cw9._reply_id == "m-9a")
+check("up at the oldest target stays there",
+      press_up(cw9) is True and cw9._reply_id == "m-9a")
+check("down moves back towards the newest target",
+      press_down(cw9) is True and cw9._reply_id == "m-9b")
+check("down moves to the newest target",
+      press_down(cw9) is True and cw9._reply_id == "m-9c")
+check("down on the newest target exits reply mode",
+      press_down(cw9) is True and cw9._reply_id == "")
+
+cw9._input.setPlainText("")
+press_up(cw9)
+cw9._input.setPlainText(cw9._input.toPlainText() + "typed answer")
+check("typing disables reply-target cycling",
+      press_up(cw9) is False and cw9._reply_id == "m-9c")
 
 # 8. Down cancels a reply the user has not started typing ---------------------
 cw7 = new_widget()
