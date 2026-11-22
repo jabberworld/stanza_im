@@ -892,6 +892,10 @@ if HAS_WEBENGINE:
             self._scroll_poll = QtCore.QTimer(self)
             self._scroll_poll.setInterval(250)
             self._scroll_poll.timeout.connect(self._poll_scroll_position)
+            self._show_poll = QtCore.QTimer(self)
+            self._show_poll.setSingleShot(True)
+            self._show_poll.setInterval(120)
+            self._show_poll.timeout.connect(self._poll_scroll_position)
 
             # Load the empty page
             self._load_empty()
@@ -904,6 +908,7 @@ if HAS_WEBENGINE:
             """
             try:
                 self._scroll_poll.stop()
+                self._show_poll.stop()
             except RuntimeError:
                 pass
             self._ready = False
@@ -2121,6 +2126,9 @@ window.__stanzaMentionRef = '';
             poll = getattr(self, "_scroll_poll", None)
             if poll is not None:
                 poll.stop()
+            show_poll = getattr(self, "_show_poll", None)
+            if show_poll is not None:
+                show_poll.stop()
             super().hideEvent(event)
 
         def showEvent(self, event):
@@ -2128,7 +2136,11 @@ window.__stanzaMentionRef = '';
             poll = getattr(self, "_scroll_poll", None)
             if poll is not None and getattr(self, "_ready", False):
                 poll.start()
-                self._poll_scroll_position()
+                show_poll = getattr(self, "_show_poll", None)
+                if show_poll is not None:
+                    show_poll.start()
+                else:
+                    self._poll_scroll_position()
 
         def _set_jump_visible(self, show: bool):
             self.evaluate_js(

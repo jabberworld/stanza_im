@@ -7502,8 +7502,10 @@ class MainWindow(QtWidgets.QMainWindow):
                                     is_new=is_new, anchor=restore_anchor)
                 self._apply_muji_support(jid)
                 self._apply_muc_admin(jid)
-                QtCore.QTimer.singleShot(
-                    0, lambda key=jid: self._refresh_visible_state(key))
+                unread_state = self._unread_chats.get(jid) or {}
+                if unread_state.get("unread") or unread_state.get("mentions"):
+                    QtCore.QTimer.singleShot(
+                        0, lambda key=jid: self._refresh_visible_state(key))
             else:
                 self._track_not_in_roster(jid, display_name)
                 is_new = not self._chat_window.has_chat(jid)
@@ -8466,9 +8468,10 @@ class MainWindow(QtWidgets.QMainWindow):
             # The fetched page may be newer than the window loaded at open (a
             # join-time replay was stored first, so the page counts as
             # duplicates): let the visible conversation merge the new tail.
-            if (self._chat_area_visible()
-                    and self._chat_window.current_jid() == jid):
-                chat.schedule_tail_refresh(200)
+            # A hidden tab records the need and merges on its next focus.
+            schedule = getattr(chat, "schedule_tail_refresh", None)
+            if callable(schedule):
+                schedule(200)
 
     def _on_mam_parse_error(self, jid: str, results: int,
                             parsed: int, skipped: int):
@@ -9027,6 +9030,10 @@ class MainWindow(QtWidgets.QMainWindow):
         anchor = self._restore_anchor_for(jid)
         if chat is None:
             return
+        unread_state = self._unread_chats.get(jid) or {}
+        needs_unread = bool(
+            unread_state.get("unread") or unread_state.get("mentions")
+            or _history_sync_state(self, jid))
         suspended = bool(getattr(chat, "suspended", False))
         has_window = bool(
             (getattr(chat, "_history", None) or getattr(chat, "_messages", None))
@@ -9046,19 +9053,24 @@ class MainWindow(QtWidgets.QMainWindow):
             # never loaded its archive; do it when it is first shown.
             self._load_history(jid)
         else:
-            # The forward gap may have been stored while this tab was in the
-            # background; merge it into the already-rendered window.  A
-            # user-scrolled view stays where it is.
-            chat.schedule_tail_refresh(0)
+            # Only merge a tail that was actually marked dirty while this tab
+            # was hidden; a plain tab switch must not query SQLite.
+            taker = getattr(chat, "take_tail_refresh_on_focus", None)
+            pending, force = ((False, False) if not callable(taker)
+                              else taker())
+            if pending:
+                chat.schedule_tail_refresh(0, force=force)
         # Mirror the unread counter now (relevant for an already-loaded tab; a
         # scheduled reload re-pushes it once the window is applied).
         self._push_unread_to_chat(jid)
         # A focus/activation is one of the few points where the unread anchor
         # may move; a downward read keeps it static.
-        updater = getattr(chat, "request_anchor_update", None)
-        if callable(updater):
-            updater()
-        if has_window:
+        if needs_unread:
+            updater = getattr(chat, "request_anchor_update", None)
+            if callable(updater):
+                updater()
+        refresh_scheduled = bool(has_window and needs_unread)
+        if refresh_scheduled:
             # A current tab opened by an OSD may already have a rendered DOM
             # but a stale visible-ref list.  Re-read the viewport before the
             # visible-unread reconciliation below.
@@ -9070,7 +9082,9 @@ class MainWindow(QtWidgets.QMainWindow):
         # An auto-joined room may have loaded its history in the background
         # without touching the counters.  Now that the user actually opened it,
         # reconcile the block and (only if it is empty) clear a stale counter.
-        if self._chat_area_available() and self._chat_window.current_jid() == jid:
+        if (needs_unread and not refresh_scheduled
+                and self._chat_area_available()
+                and self._chat_window.current_jid() == jid):
             # Event-loop turn only; the view's viewport_settled/anchor_visible
             # signals drive the reconciliation once the DOM is actually ready.
             QtCore.QTimer.singleShot(
@@ -9747,6 +9761,13 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._unread_chats.pop(key, None)
             self._refresh_unread_badge(key)
             self._push_unread_to_chat(key)
+            if self._chat_window is not None:
+                chat = self._chat_window.get_chat(key)
+                schedule = getattr(chat, "schedule_tail_refresh", None)
+                if callable(schedule):
+                    # Merge the newly stored offline tail; a hidden tab keeps
+                    # the request until its next focus.
+                    schedule(0)
             changed = True
             logger.debug(
                 "UNREAD[global] jid=%s unread=%d mentions=%d local_ts=%s "
@@ -9858,6 +9879,11 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         if not (self._chat_area_visible()
                 and self._chat_window.current_jid() == key):
+            # Keep the completed tail for the next focus instead of reloading
+            # a hidden tab now.
+            schedule = getattr(chat, "schedule_tail_refresh", None)
+            if callable(schedule):
+                schedule(0)
             return
         self._history_reload_pending.add(key)
         anchor = self._restore_anchor_for(key)
@@ -10570,12 +10596,14 @@ class MainWindow(QtWidgets.QMainWindow):
                     extra["edited"] = True
                     await history.store_many_async(room, [extra])
         chat = self._chat_window.get_chat(room)
-        if (chat is not None and self._chat_area_visible()
-                and self._chat_window.current_jid() == room
+        schedule = getattr(chat, "schedule_tail_refresh", None)
+        if (callable(schedule)
                 and not getattr(chat, "_user_scrolled_up", False)):
-            chat.schedule_tail_refresh(
-                force=(bool(edits)
-                       or any(not row.get("archive_id") for row in rows)))
+            # The timer marks a hidden tab for its next focus instead of
+            # querying/rendering it in the background.
+            schedule(force=(bool(edits)
+                            or any(not row.get("archive_id")
+                                   for row in rows)))
 
     def _replay_rows_to_store(self, room: str,
                               rows: list[dict]) -> list[dict]:

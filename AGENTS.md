@@ -1638,7 +1638,11 @@ tab is removed, the room stays joined, other tabs keep the window open); on a
 leaving, exactly like Esc) and, for conferences, «Покинуть конференцию» (the
 confirmed `_close_tab` leave path). Dragging a tab only reorders `_tab_order`;
 `currentChanged` with the same conversation does not re-run focus/tail/unread
-work, so reordering stays cheap.
+work, so reordering stays cheap. Focusing a read conversation only mirrors its
+counters; the tail query, JS viewport poll and visible-unread reconciliation
+run only for unread/history-sync chats. A hidden tab's stored tail is marked
+and merged on its next focus instead of being queried on every switch, and the
+first scroll poll after `showEvent` is deferred briefly.
 
 **OSD notifications** (`ui/osd.py`): `OsdManager` owns a stack of translucent
 frameless always-on-top windows (flags include `X11BypassWindowManagerHint`,

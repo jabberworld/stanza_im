@@ -1108,6 +1108,7 @@ class ChatWidget(QtWidgets.QWidget):
         # not): gates server paging, never the local one.
         self._server_archive_available = True
         self._tail_refresh_on_resume = False
+        self._tail_refresh_on_focus = False
 
         self._typing_timer = QtCore.QTimer(self)
         self._typing_timer.setSingleShot(True)
@@ -2939,6 +2940,7 @@ class ChatWidget(QtWidgets.QWidget):
         except RuntimeError:
             pass
         self._tail_refresh_on_resume = False
+        self._tail_refresh_on_focus = False
         self._pending_link_focus = False
         app = QtWidgets.QApplication.instance()
         if app is not None:
@@ -3052,6 +3054,7 @@ class ChatWidget(QtWidgets.QWidget):
         self._prepared_html = list(prepared or [])
         self._prepared_settings = (self._render_settings_hash()
                                    if self._prepared_html else "")
+        self._tail_refresh_on_focus = False
         self._initial_load_done = True
         self._user_scrolled_up = False
         self._window_size = max(50, int(window_size))
@@ -3910,7 +3913,24 @@ class ChatWidget(QtWidgets.QWidget):
                  if delay_ms is None else int(delay_ms))
         self._tail_refresh_timer.start(max(0, delay))
 
+    def take_tail_refresh_on_focus(self) -> tuple[bool, bool]:
+        """Whether a hidden tab has stored rows waiting for a merge.
+
+        Returns ``(pending, force)``.  ``force`` is kept until the tab is
+        visible again, otherwise an older MUC join replay would be dropped
+        while the tab is hidden.
+        """
+        pending = bool(self._tail_refresh_on_focus
+                       or self._tail_refresh_timer.isActive())
+        force = bool(self.__dict__.get("_tail_refresh_force", False))
+        self._tail_refresh_on_focus = False
+        self._tail_refresh_force = False
+        return pending, force
+
     def _run_tail_refresh(self) -> None:
+        if not self.isVisible():
+            self._tail_refresh_on_focus = True
+            return
         force = bool(self.__dict__.pop("_tail_refresh_force", False))
         self._start_task(self.refresh_tail_if_newer(force=force))
 
@@ -3928,7 +3948,12 @@ class ChatWidget(QtWidgets.QWidget):
         if self._suspended:
             self._tail_refresh_on_resume = True
             return False
-        if not force and (not self.isVisible() or self._user_scrolled_up):
+        if not force and not self.isVisible():
+            # Remember it for the next focus instead of querying SQLite while
+            # the tab is hidden.
+            self._tail_refresh_on_focus = True
+            return False
+        if not force and self._user_scrolled_up:
             return False
         from stanza_im.core import history
         newest = await history.newest_timestamp_async(self.jid)

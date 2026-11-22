@@ -238,6 +238,14 @@ check("the visible-ref cache is keyed by the scroll offset",
 check("the scroll listener is installed before the bridge setup",
       _view_src.index("addEventListener('scroll'")
       < _view_src.index("if (!window.bridge)"))
+check("the first poll after showing a tab is deferred",
+      "_show_poll" in _view_src)
+
+_focus_src = inspect.getsource(MainWindow._focus_chat)
+check("focus only reconciles chats that still have unread state",
+      "needs_unread" in _focus_src)
+check("focus only merges a tail when the tab marked one",
+      "take_tail_refresh_on_focus" in _focus_src)
 check("no anchor scroll means the guard is open",
       anchor_scroll_guard_open(None, [], 0.0))
 check("the guard opens once the anchor target is visible",
