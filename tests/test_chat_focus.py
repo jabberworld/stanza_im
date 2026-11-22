@@ -52,6 +52,19 @@ check("opening an already-open chat restores the window too",
       not window.isMinimized()
       and window.current_jid() == "carol@example.com")
 
+# Reordering tabs changes their indices but must not re-run focus work for the
+# same conversation (that used to fire tail/JS/unread work on every move).
+focused = []
+window.tab_focused.connect(focused.append)
+window._tab_widget.tabBar().moveTab(0, 1)
+check("dragging a tab does not re-focus the same conversation",
+      focused == [] and window.current_jid() == "carol@example.com")
+check("the reordered tab remains the same widget",
+      window._tab_order == ["carol@example.com", "bob@example.com"])
+check("activate brings an existing tab forward",
+      window.activate("bob@example.com")
+      and window.current_jid() == "bob@example.com")
+
 _source = open(os.path.join(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))), "stanza_im", "ui", "chat_window.py"),
     encoding="utf-8").read()

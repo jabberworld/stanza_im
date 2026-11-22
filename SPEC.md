@@ -1322,7 +1322,9 @@ show/raise/activate calls and emits `attention_requested` instead, so
   equivalent of "Leave conference" (with `muc_confirm_leave` when enabled).
 - The tab-bar context menu offers «Скрыть» for every conversation (a MUC tab
   closes without leaving, like Esc) and «Покинуть конференцию» for conferences
-  (the confirmed `_close_tab` leave path).
+  (the confirmed `_close_tab` leave path). Dragging a tab only updates
+  `_tab_order`; a `currentChanged` that keeps the same conversation does not
+  re-run focus/tail/unread work.
 
 ### 8.3 Tab Lifecycle
 

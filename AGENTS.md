@@ -1635,7 +1635,9 @@ tab is removed, the room stays joined, other tabs keep the window open); on a
 `_chat_dialog_parent`) and closes a 1:1 tab. The tab bar's context menu offers
 «Скрыть» for every conversation (for a conference this closes the tab **without**
 leaving, exactly like Esc) and, for conferences, «Покинуть конференцию» (the
-confirmed `_close_tab` leave path).
+confirmed `_close_tab` leave path). Dragging a tab only reorders `_tab_order`;
+`currentChanged` with the same conversation does not re-run focus/tail/unread
+work, so reordering stays cheap.
 
 **OSD notifications** (`ui/osd.py`): `OsdManager` owns a stack of translucent
 frameless always-on-top windows (flags include `X11BypassWindowManagerHint`,

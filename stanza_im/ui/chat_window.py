@@ -1024,8 +1024,15 @@ class ChatWindow(QtWidgets.QMainWindow):
         current = None
         widget = self._tab_widget.currentWidget()
         if isinstance(widget, ChatWidget):
-            self._resume_widget(widget)
             current = widget.jid
+            if current == previous:
+                # Dragging a tab reorders the indices but keeps the same
+                # conversation current.  Do not run focus/tail/unread work
+                # for every intermediate tab position.
+                self._active_jid = current
+                self._update_title()
+                return
+            self._resume_widget(widget)
             widget.focus_input()
             self.tab_focused.emit(widget.jid)
         previous_widget = self._tabs.get(previous) if previous else None
@@ -1055,6 +1062,14 @@ class ChatWindow(QtWidgets.QMainWindow):
         self.show()
         self.raise_()
         self.activateWindow()
+
+    def activate(self, jid: str) -> bool:
+        """Bring an existing tab to the front without reopening it."""
+        widget = self._tabs.get(jid)
+        if widget is None:
+            return False
+        self._focus_tab(jid)
+        return True
 
     def _focus_tab(self, jid: str):
         widget = self._tabs.get(jid)
